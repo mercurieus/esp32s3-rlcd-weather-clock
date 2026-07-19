@@ -1,0 +1,12 @@
+# ESP-IDF build output
+build/
+managed_components/
+sdkconfig.old
+
+# VS Code
+.vscode/
+
+# Editor / OS junk
+*.swp
+*~
+.DS_Store

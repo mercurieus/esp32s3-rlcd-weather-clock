@@ -1,0 +1,24 @@
+{
+  "files": [
+    "actions.h",
+    "fonts.h",
+    "images.c",
+    "images.h",
+    "screens.c",
+    "screens.h",
+    "structs.h",
+    "styles.c",
+    "styles.h",
+    "ui.c",
+    "ui.h",
+    "ui_font_saira200.c",
+    "ui_font_saira_condensed_bold200.c",
+    "ui_image_icon_cloud.c",
+    "ui_image_icon_partly_cloudy.c",
+    "ui_image_icon_rain.c",
+    "ui_image_icon_snow.c",
+    "ui_image_icon_storm.c",
+    "ui_image_icon_sun.c",
+    "vars.h"
+  ]
+}
