@@ -61,7 +61,7 @@ New components, each with one job:
 |---|---|---|
 | `components/input/buttons.[ch]` | Debounce, classify short/long press, expose events | driver/gpio, esp_sleep |
 | `components/ui/nav.[ch]` | Navigation state machine. Pure C, no LVGL, no ESP-IDF | nothing |
-| `components/ui/chrome.[ch]` | Top bar + hint overlay + focus frame on `lv_layer_top()` | lvgl |
+| `components/ui/overlay.[ch]` | Top bar + hint overlay + focus frame on `lv_layer_top()` | lvgl |
 | `components/settings/settings.[ch]` | Typed settings struct, NVS load/save, TZ table | nvs_flash |
 | `components/ui/screen_settings.[ch]` | Settings list rendering and row actions | lvgl, settings |
 
@@ -117,7 +117,7 @@ Focusable elements:
 `nav_handle(nav_state_t *, btn_event_t)` returns a `nav_action_t` describing
 what the caller must redraw. The state machine itself touches no widgets.
 
-## Shared chrome on `lv_layer_top()`
+## Shared overlay on `lv_layer_top()`
 
 `lv_layer_top()` floats above whichever screen is loaded and survives
 `lv_screen_load()`. Moving the top bar there **removes the duplication added
@@ -408,7 +408,7 @@ Each builds, flashes, and is verifiable on its own.
 2. Input layer + nav state machine + hint overlay. Select cycles Main and
    Cal+Clock; long OK opens a stub Settings screen. Also logs GPIO transitions
    so the Select pin can be confirmed.
-3. Chrome onto `lv_layer_top()`; delete the duplicated top bars.
+3. Overlay onto `lv_layer_top()`; delete the duplicated top bars.
 4. Cal+Clock Vista redraw: dial with second hand, month browsing, day detail.
 5. Weather API extension and the sun/moon strip.
 6. Settings screen and NVS.
@@ -426,7 +426,7 @@ Each builds, flashes, and is verifiable on its own.
   if it becomes tight, the Settings list is the natural candidate for building
   rows on demand rather than up front.
 - **`lv_layer_top()` persistence across `lv_screen_load()`** is assumed and
-  must be confirmed early in milestone 3, since the whole chrome design rests
+  must be confirmed early in milestone 3, since the whole overlay design rests
   on it.
 - **Hint overlay refresh cost** adds one full-panel write per button press.
   Measurable, but worth watching on battery.

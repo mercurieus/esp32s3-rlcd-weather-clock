@@ -4,7 +4,7 @@
 
 **Goal:** Give the clock correct UTC-based timekeeping and working two-button navigation, with one shared top bar, a focus frame, and transient button hints.
 
-**Architecture:** The RTC switches to storing UTC with the timezone applied only at display time, which also fixes DST. A dependency-free navigation state machine sits between a debouncing button layer and the screens. Shared chrome (top bar, focus frame, hint overlay) moves onto `lv_layer_top()`, which floats above whichever screen is loaded, deleting the duplicated top bar added in ccffbf5.
+**Architecture:** The RTC switches to storing UTC with the timezone applied only at display time, which also fixes DST. A dependency-free navigation state machine sits between a debouncing button layer and the screens. Shared overlay (top bar, focus frame, hint overlay) moves onto `lv_layer_top()`, which floats above whichever screen is loaded, deleting the duplicated top bar added in ccffbf5.
 
 **Tech Stack:** ESP-IDF 5.5.5, LVGL 9.5, FreeRTOS, picolibc, Waveshare ESP32-S3-RLCD-4.2.
 
@@ -20,7 +20,7 @@
 - **LVGL timers do not run on their own.** `lv_timer_handler()` is only called from `Lvgl_Refresh()`. Anything time-based must be driven from the one-second task tick.
 - **Buttons:** Select = `GPIO_NUM_18`, OK = `GPIO_NUM_0`. Active low, internal pull-up.
 - **All LVGL calls must hold the lock:** `Lvgl_lock(-1)` / `Lvgl_unlock()`.
-- **Screen coordinates:** 400x300. Shared chrome owns y 0..36. Screens own y 38..300.
+- **Screen coordinates:** 400x300. Shared overlay owns y 0..36. Screens own y 38..300.
 
 ## Build environment
 
@@ -57,7 +57,7 @@ Then from `firmware/`:
 | `components/ui/btn_event.h` | Shared `btn_event_t` enum, zero dependencies |
 | `components/input/buttons.[ch]` | Debounce, long-press classification, wake sources |
 | `components/ui/nav.[ch]` | Navigation state machine, pure C |
-| `components/ui/chrome.[ch]` | Top bar, focus frame, hint overlay on `lv_layer_top()` |
+| `components/ui/overlay.[ch]` | Top bar, focus frame, hint overlay on `lv_layer_top()` |
 | `components/clock/clock_task.c` | Modified: drives buttons -> nav -> screens |
 | `tools/verify_nav.py` | Host-side invariant check of the transition table |
 
@@ -1316,8 +1316,8 @@ assertions plus an exhaustive host-side invariant check."
 Deletes the duplicated top bar added in ccffbf5. One widget set now serves every screen.
 
 **Files:**
-- Create: `firmware/components/ui/chrome.h`
-- Create: `firmware/components/ui/chrome.c`
+- Create: `firmware/components/ui/overlay.h`
+- Create: `firmware/components/ui/overlay.c`
 - Modify: `firmware/components/ui/screens.c`
 - Modify: `firmware/components/ui/screens.h`
 - Modify: `firmware/components/ui/ui.c`
@@ -1326,8 +1326,8 @@ Deletes the duplicated top bar added in ccffbf5. One widget set now serves every
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
 - Produces:
-  - `void Chrome_Create(void)`
-  - `void Chrome_SetTopBar(const char *temp, const char *hum, const char *date, const char *battery)`
+  - `void Overlay_Create(void)`
+  - `void Overlay_SetTopBar(const char *temp, const char *hum, const char *date, const char *battery)`
 
 - [ ] **Step 1: Confirm the assumption the whole design rests on**
 
@@ -1344,11 +1344,11 @@ Run: `& $py "$env:IDF_PATH\tools\idf.py" -p COM<N> flash monitor`
 
 Expected: `LAYER TOP OK` is visible on the init screen, still visible after the main screen loads, and still visible after pressing the button to reach the calendar.
 
-**If it disappears on a screen change, stop and report it** — sections C and the whole chrome design in the spec need revisiting. Delete the probe once confirmed.
+**If it disappears on a screen change, stop and report it** — sections C and the whole overlay design in the spec need revisiting. Delete the probe once confirmed.
 
-- [ ] **Step 2: Write the chrome component**
+- [ ] **Step 2: Write the overlay component**
 
-`firmware/components/ui/chrome.h`:
+`firmware/components/ui/overlay.h`:
 
 ```c
 #pragma once
@@ -1359,12 +1359,12 @@ Expected: `LAYER TOP OK` is visible on the init screen, still visible after the 
 extern "C" {
 #endif
 
-/* Builds the shared chrome on lv_layer_top(), which floats above whichever
+/* Builds the shared overlay on lv_layer_top(), which floats above whichever
    screen is loaded. Call once, after create_screens(). */
-void Chrome_Create(void);
+void Overlay_Create(void);
 
 /* Updates the top bar. Strings are copied. */
-void Chrome_SetTopBar(const char *temp, const char *hum,
+void Overlay_SetTopBar(const char *temp, const char *hum,
                       const char *date, const char *battery);
 
 #ifdef __cplusplus
@@ -1372,10 +1372,10 @@ void Chrome_SetTopBar(const char *temp, const char *hum,
 #endif
 ```
 
-`firmware/components/ui/chrome.c`:
+`firmware/components/ui/overlay.c`:
 
 ```c
-#include "chrome.h"
+#include "overlay.h"
 
 #include "fonts.h"
 
@@ -1386,7 +1386,7 @@ static lv_obj_t *s_battery;
 
 /* A solid 2 px block, not an lv_line: hairlines dither away on a 1 bit
    panel. */
-static void chrome_rule(lv_obj_t *parent, int x, int y, int w)
+static void overlay_rule(lv_obj_t *parent, int x, int y, int w)
 {
     lv_obj_t *o = lv_obj_create(parent);
     lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
@@ -1399,7 +1399,7 @@ static void chrome_rule(lv_obj_t *parent, int x, int y, int w)
     lv_obj_set_style_bg_opa(o, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
 }
 
-static lv_obj_t *chrome_frame(lv_obj_t *parent, int x, int y, int w, int h)
+static lv_obj_t *overlay_frame(lv_obj_t *parent, int x, int y, int w, int h)
 {
     lv_obj_t *o = lv_obj_create(parent);
     lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
@@ -1414,7 +1414,7 @@ static lv_obj_t *chrome_frame(lv_obj_t *parent, int x, int y, int w, int h)
     return o;
 }
 
-static lv_obj_t *chrome_label(lv_obj_t *parent, int x, int y, int width,
+static lv_obj_t *overlay_label(lv_obj_t *parent, int x, int y, int width,
                               lv_text_align_t align, const char *text)
 {
     lv_obj_t *l = lv_label_create(parent);
@@ -1431,7 +1431,7 @@ static lv_obj_t *chrome_label(lv_obj_t *parent, int x, int y, int width,
     return l;
 }
 
-void Chrome_Create(void)
+void Overlay_Create(void)
 {
     lv_obj_t *top = lv_layer_top();
 
@@ -1452,18 +1452,18 @@ void Chrome_Create(void)
     lv_obj_set_style_bg_color(band, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(band, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    chrome_frame(top, 329, 5, 64, 26);   /* battery body */
-    chrome_frame(top, 391, 10, 7, 16);   /* battery nub  */
+    overlay_frame(top, 329, 5, 64, 26);   /* battery body */
+    overlay_frame(top, 391, 10, 7, 16);   /* battery nub  */
 
-    s_temp    = chrome_label(top, 2, 3, 0, LV_TEXT_ALIGN_LEFT, "0.0");
-    s_hum     = chrome_label(top, 89, 3, 0, LV_TEXT_ALIGN_LEFT, "0%");
-    s_date    = chrome_label(top, 163, 3, 0, LV_TEXT_ALIGN_LEFT, "01.01.2000");
-    s_battery = chrome_label(top, 332, 3, 58, LV_TEXT_ALIGN_CENTER, "0.00");
+    s_temp    = overlay_label(top, 2, 3, 0, LV_TEXT_ALIGN_LEFT, "0.0");
+    s_hum     = overlay_label(top, 89, 3, 0, LV_TEXT_ALIGN_LEFT, "0%");
+    s_date    = overlay_label(top, 163, 3, 0, LV_TEXT_ALIGN_LEFT, "01.01.2000");
+    s_battery = overlay_label(top, 332, 3, 58, LV_TEXT_ALIGN_CENTER, "0.00");
 
-    chrome_rule(top, 0, 34, 400);
+    overlay_rule(top, 0, 34, 400);
 }
 
-void Chrome_SetTopBar(const char *temp, const char *hum,
+void Overlay_SetTopBar(const char *temp, const char *hum,
                       const char *date, const char *battery)
 {
     if (!s_temp) {
@@ -1489,11 +1489,11 @@ In `firmware/components/ui/screens.h`, delete `obj0`, `obj1`, `temp`, `hum`, `da
 
 **Do not delete `objects.obj2`** (the blinking colon) or `objects.obj4` (the rule at y=187) — both are still used.
 
-In `firmware/components/ui/ui.c`, add `#include "chrome.h"` and call `Chrome_Create();` in `ui_init()` immediately after `create_screens()`.
+In `firmware/components/ui/ui.c`, add `#include "overlay.h"` and call `Overlay_Create();` in `ui_init()` immediately after `create_screens()`.
 
 - [ ] **Step 4: Point clock_task at the shared bar**
 
-In `firmware/components/clock/clock_task.c`, add `#include "chrome.h"`, then inside `update_labels` replace these five lines:
+In `firmware/components/clock/clock_task.c`, add `#include "overlay.h"`, then inside `update_labels` replace these five lines:
 
 ```c
         lv_label_set_text(objects.temp, temp_buf);
@@ -1508,7 +1508,7 @@ In `firmware/components/clock/clock_task.c`, add `#include "chrome.h"`, then ins
 with a single call:
 
 ```c
-        Chrome_SetTopBar(temp_buf, hum_buf, date_buf, batt_buf);
+        Overlay_SetTopBar(temp_buf, hum_buf, date_buf, batt_buf);
 ```
 
 - [ ] **Step 5: Build and verify on hardware**
@@ -1524,7 +1524,7 @@ Expected:
 3. Free LVGL heap has gone up, not down — six widgets were deleted and one
    set added.
 
-To observe point 3, add this to the end of `Chrome_Create()`:
+To observe point 3, add this to the end of `Overlay_Create()`:
 
 ```c
     lv_mem_monitor_t mon;
@@ -1550,37 +1550,37 @@ now serves every screen. Removes the duplicate bar added in ccffbf5."
 ### Task 7: Focus frame and hint overlay
 
 **Files:**
-- Modify: `firmware/components/ui/chrome.h`
-- Modify: `firmware/components/ui/chrome.c`
+- Modify: `firmware/components/ui/overlay.h`
+- Modify: `firmware/components/ui/overlay.c`
 
 **Interfaces:**
-- Consumes: `Chrome_Create` from Task 6.
+- Consumes: `Overlay_Create` from Task 6.
 - Produces:
-  - `void Chrome_ShowFocus(const lv_area_t *area)` — `NULL` hides the frame
-  - `void Chrome_ShowHint(const char *text, uint32_t now_ms, uint32_t duration_ms)`
-  - `bool Chrome_TickHint(uint32_t now_ms)` — returns true when it hid the hint and the caller must redraw
+  - `void Overlay_ShowFocus(const lv_area_t *area)` — `NULL` hides the frame
+  - `void Overlay_ShowHint(const char *text, uint32_t now_ms, uint32_t duration_ms)`
+  - `bool Overlay_TickHint(uint32_t now_ms)` — returns true when it hid the hint and the caller must redraw
 
 - [ ] **Step 1: Extend the header**
 
-Append to `firmware/components/ui/chrome.h`, before the `#ifdef __cplusplus` closing block:
+Append to `firmware/components/ui/overlay.h`, before the `#ifdef __cplusplus` closing block:
 
 ```c
 /* Draws the focus frame around an absolute screen rectangle.
    Pass NULL to hide it. */
-void Chrome_ShowFocus(const lv_area_t *area);
+void Overlay_ShowFocus(const lv_area_t *area);
 
 /* Shows the hint overlay for duration_ms. The text is copied. */
-void Chrome_ShowHint(const char *text, uint32_t now_ms, uint32_t duration_ms);
+void Overlay_ShowHint(const char *text, uint32_t now_ms, uint32_t duration_ms);
 
 /* Call once per task tick. Hides an expired hint and returns true when it
    did, meaning the caller must refresh. LVGL timers cannot do this: they
    only run inside Lvgl_Refresh(), which only runs when something is dirty. */
-bool Chrome_TickHint(uint32_t now_ms);
+bool Overlay_TickHint(uint32_t now_ms);
 ```
 
 - [ ] **Step 2: Implement**
 
-Add to `firmware/components/ui/chrome.c`, alongside the existing statics:
+Add to `firmware/components/ui/overlay.c`, alongside the existing statics:
 
 ```c
 static lv_obj_t *s_focus;
@@ -1590,12 +1590,12 @@ static uint32_t  s_hint_until_ms;
 static bool      s_hint_visible;
 ```
 
-Add these two blocks to the end of `Chrome_Create()`:
+Add these two blocks to the end of `Overlay_Create()`:
 
 ```c
     /* Focus frame. 3 px so it survives the 1 bit threshold, and hidden
        until a focusable element is selected. */
-    s_focus = chrome_frame(top, 0, 0, 10, 10);
+    s_focus = overlay_frame(top, 0, 0, 10, 10);
     lv_obj_set_style_border_width(s_focus, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_add_flag(s_focus, LV_OBJ_FLAG_HIDDEN);
 
@@ -1626,7 +1626,7 @@ Add these two blocks to the end of `Chrome_Create()`:
 Append the three public functions:
 
 ```c
-void Chrome_ShowFocus(const lv_area_t *area)
+void Overlay_ShowFocus(const lv_area_t *area)
 {
     if (!s_focus) {
         return;
@@ -1642,7 +1642,7 @@ void Chrome_ShowFocus(const lv_area_t *area)
     lv_obj_remove_flag(s_focus, LV_OBJ_FLAG_HIDDEN);
 }
 
-void Chrome_ShowHint(const char *text, uint32_t now_ms, uint32_t duration_ms)
+void Overlay_ShowHint(const char *text, uint32_t now_ms, uint32_t duration_ms)
 {
     if (!s_hint_box) {
         return;
@@ -1653,7 +1653,7 @@ void Chrome_ShowHint(const char *text, uint32_t now_ms, uint32_t duration_ms)
     s_hint_until_ms = now_ms + duration_ms;
 }
 
-bool Chrome_TickHint(uint32_t now_ms)
+bool Overlay_TickHint(uint32_t now_ms)
 {
     if (!s_hint_visible) {
         return false;
@@ -1678,8 +1678,8 @@ The hint box occupies y 252..292. On the main screen that overlaps the forecast 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add firmware/components/ui/chrome.h firmware/components/ui/chrome.c
-git commit -m "feat: add focus frame and hint overlay to shared chrome
+git add firmware/components/ui/overlay.h firmware/components/ui/overlay.c
+git commit -m "feat: add focus frame and hint overlay to shared overlay
 
 Hint expiry is driven from the caller's tick, not an LVGL timer, because
 lv_timer_handler only runs inside Lvgl_Refresh."
@@ -1694,7 +1694,7 @@ lv_timer_handler only runs inside Lvgl_Refresh."
 - Modify: `firmware/components/clock/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `Buttons_*` (Task 4), `nav_*` (Task 5), `Chrome_*` (Tasks 6 and 7).
+- Consumes: `Buttons_*` (Task 4), `nav_*` (Task 5), `Overlay_*` (Tasks 6 and 7).
 - Produces: nothing further.
 
 - [ ] **Step 1: Add the dependencies and includes**
@@ -1706,7 +1706,7 @@ In `firmware/components/clock/clock_task.c`, add:
 ```c
 #include "buttons.h"
 #include "nav.h"
-#include "chrome.h"
+#include "overlay.h"
 #include "esp_timer.h"
 ```
 
@@ -1780,9 +1780,9 @@ static void apply_nav_visuals(void)
     if (s_nav.mode == NAV_FOCUS && s_nav.screen == NAV_SCREEN_MAIN) {
         lv_area_t a;
         main_focus_area(s_nav.focus, &a);
-        Chrome_ShowFocus(&a);
+        Overlay_ShowFocus(&a);
     } else {
-        Chrome_ShowFocus(NULL);
+        Overlay_ShowFocus(NULL);
     }
 }
 ```
@@ -1805,7 +1805,7 @@ Delete `configure_key_button_wakeup()` entirely and its call site. In its place,
     nav_init(&s_nav, nav_focus_count, 1);
 
     if (Lvgl_lock(-1)) {
-        Chrome_ShowHint(hint_for_mode(&s_nav), now_ms(), HINT_BOOT_MS);
+        Overlay_ShowHint(hint_for_mode(&s_nav), now_ms(), HINT_BOOT_MS);
         Lvgl_Refresh();
         Lvgl_unlock();
     }
@@ -1832,7 +1832,7 @@ Replace the whole `if (button_pressed && !s_battery_warning_active) { ... }` blo
                             s_last_cal_min = now.tm_min;
                         }
                     }
-                    Chrome_ShowHint(hint_for_mode(&s_nav), now_ms(), HINT_EVENT_MS);
+                    Overlay_ShowHint(hint_for_mode(&s_nav), now_ms(), HINT_EVENT_MS);
                     Lvgl_Refresh();
                     Lvgl_unlock();
                 }
@@ -1848,7 +1848,7 @@ Then extend the same block so an expired hint triggers a redraw:
 
 ```c
         if (Lvgl_lock(-1)) {
-            bool dirty = Chrome_TickHint(now_ms());
+            bool dirty = Overlay_TickHint(now_ms());
 
             if (s_battery_warning_active) {
                 /* the notice is static - nothing to redraw */
