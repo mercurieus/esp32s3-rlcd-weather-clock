@@ -17,6 +17,7 @@
 #include "esp_sleep.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include <stdio.h>
 #define SYNC_HOUR_1 5
 #define SYNC_HOUR_2 15
 #define BATTERY_WARNING_MV  3200
@@ -25,6 +26,11 @@ static const char *TAG = "ClockTask";
 static const char *WEEKDAY_NAMES[7] = { "Su", "Mo", "Tu", "We", "Th", "Fr", "Sa" };
 static WeatherDay s_weather[4];
 static bool s_battery_warning_active = false;
+static bool s_colon_visible = true;
+static bool s_on_calendar_screen = false;
+static int s_last_cal_day = -1;
+static int s_last_cal_mon = -1;
+static int s_last_cal_min = -1;
 
 typedef enum { WICON_SUNNY, WICON_PARTLY_CLOUDY, WICON_CLOUDY, WICON_RAINY, WICON_SNOWY, WICON_STORM } WeatherIcon;
 
@@ -89,16 +95,17 @@ static WeatherIcon classify_weathercode(int code)
     return WICON_CLOUDY;
 }
 
-static void set_day_icon(lv_obj_t *icon_obj, WeatherIcon icon)
+static const lv_image_dsc_t *weather_icon_src(WeatherIcon icon)
 {
     switch (icon) {
-        case WICON_SUNNY:         lv_image_set_src(icon_obj, &img_icon_sun);            break;
-        case WICON_PARTLY_CLOUDY: lv_image_set_src(icon_obj, &img_icon_partly_cloudy);   break;
-        case WICON_CLOUDY:        lv_image_set_src(icon_obj, &img_icon_cloud);           break;
-        case WICON_RAINY:         lv_image_set_src(icon_obj, &img_icon_rain);            break;
-        case WICON_SNOWY:         lv_image_set_src(icon_obj, &img_icon_snow);            break;
-        case WICON_STORM:         lv_image_set_src(icon_obj, &img_icon_storm);           break;
+        case WICON_SUNNY:         return &img_icon_sun;
+        case WICON_PARTLY_CLOUDY: return &img_icon_partly_cloudy;
+        case WICON_CLOUDY:        return &img_icon_cloud;
+        case WICON_RAINY:         return &img_icon_rain;
+        case WICON_SNOWY:         return &img_icon_snow;
+        case WICON_STORM:         return &img_icon_storm;
     }
+    return &img_icon_cloud;
 }
 
 static void wifi_connected_cb(void *ctx)
@@ -117,6 +124,7 @@ static void update_labels(const struct tm *t, float temperature, float humidity,
 {
     if (Lvgl_lock(-1)) {
         char c[2] = { '0', '\0' };
+        char temp_buf[32], hum_buf[16], date_buf[40], batt_buf[24];
 
         c[0] = (char)('0' + (t->tm_hour / 10) % 10);
         lv_label_set_text(objects.clock_hh1, c);
@@ -127,19 +135,24 @@ static void update_labels(const struct tm *t, float temperature, float humidity,
         c[0] = (char)('0' + t->tm_min % 10);
         lv_label_set_text(objects.clock_mm2, c);
 
-        lv_label_set_text_fmt(objects.hum, "%d%%", (int)(humidity + 0.5f));
-        lv_label_set_text_fmt(objects.date, "%02d.%02d.%04d", t->tm_mday, t->tm_mon + 1, t->tm_year + 1900);
-
-        int volt_whole = battery_mv / 1000;
-        int volt_frac = (battery_mv % 1000) / 10;
-        lv_label_set_text_fmt(objects.battery, "%d.%02d", volt_whole, volt_frac);
-
         bool temp_negative = temperature < 0.0f;
         float temp_abs = temp_negative ? -temperature : temperature;
         int temp_whole = (int)temp_abs;
         int temp_frac = (int)((temp_abs - temp_whole) * 10.0f + 0.5f);
         if (temp_frac >= 10) { temp_frac = 0; temp_whole += 1; }
-        lv_label_set_text_fmt(objects.temp, "%s%d.%d°C", temp_negative ? "-" : "", temp_whole, temp_frac);
+
+        snprintf(temp_buf, sizeof(temp_buf), "%s%d.%d°C", temp_negative ? "-" : "", temp_whole, temp_frac);
+        snprintf(hum_buf, sizeof(hum_buf), "%d%%", (int)(humidity + 0.5f));
+        snprintf(date_buf, sizeof(date_buf), "%02d.%02d.%04d", t->tm_mday, t->tm_mon + 1, t->tm_year + 1900);
+        snprintf(batt_buf, sizeof(batt_buf), "%d.%02d", battery_mv / 1000, (battery_mv % 1000) / 10);
+
+        lv_label_set_text(objects.temp, temp_buf);
+        lv_label_set_text(objects.hum, hum_buf);
+        lv_label_set_text(objects.date, date_buf);
+        lv_label_set_text(objects.battery, batt_buf);
+
+        /* the calendar screen carries its own copy of the top bar */
+        calendar_update_top_bar(temp_buf, hum_buf, date_buf, batt_buf);
 
         Lvgl_Refresh();
         Lvgl_unlock();
@@ -154,9 +167,19 @@ static void update_forecast_labels(const WeatherDay days[4])
         lv_obj_t *temp_objs[4] = { objects.day1_temp, objects.day2_temp, objects.day3_temp, objects.day4_temp };
 
         for (int i = 0; i < 4; i++) {
-            lv_label_set_text_fmt(date_objs[i], "%d/%d %s", days[i].day, days[i].month, WEEKDAY_NAMES[days[i].weekday]);
-            set_day_icon(icon_objs[i], classify_weathercode(days[i].weathercode));
-            lv_label_set_text_fmt(temp_objs[i], "%d/%d°C", days[i].temp_max, days[i].temp_min);
+            char date_buf[40], temp_buf[32], cal_temp_buf[32];
+            const lv_image_dsc_t *icon = weather_icon_src(classify_weathercode(days[i].weathercode));
+
+            snprintf(date_buf, sizeof(date_buf), "%d/%d %s", days[i].day, days[i].month, WEEKDAY_NAMES[days[i].weekday]);
+            snprintf(temp_buf, sizeof(temp_buf), "%d/%d°C", days[i].temp_max, days[i].temp_min);
+            /* the calendar row is narrower, so it drops the unit */
+            snprintf(cal_temp_buf, sizeof(cal_temp_buf), "%d/%d°", days[i].temp_max, days[i].temp_min);
+
+            lv_label_set_text(date_objs[i], date_buf);
+            lv_image_set_src(icon_objs[i], icon);
+            lv_label_set_text(temp_objs[i], temp_buf);
+
+            calendar_update_forecast(i, date_buf, icon, cal_temp_buf);
         }
 
         Lvgl_Refresh();
@@ -229,37 +252,10 @@ static void clock_task(void *arg)
     }
 
     int last_sync_hour = -1;
+    int last_minute = -1;
     for (;;) {
-        struct tm pre_sleep;
-        if (Pcf85063_GetTime(&pre_sleep) != ESP_OK) {
-            pre_sleep.tm_sec = 0;
-        }
-        int seconds_to_next_minute = 60 - pre_sleep.tm_sec;
-        if (seconds_to_next_minute <= 0 || seconds_to_next_minute > 60) {
-            seconds_to_next_minute = 60;
-        }
-
-        esp_sleep_enable_timer_wakeup((uint64_t)seconds_to_next_minute * 1000000ULL);
+        esp_sleep_enable_timer_wakeup(1000000ULL);
         esp_light_sleep_start();
-
-        bool button_pressed = (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO);
-
-        if (button_pressed) {
-            ESP_LOGI(TAG, "KEY button pressed - forcing sync...");
-
-            while (gpio_get_level(KEY_BUTTON_PIN) == 0) {
-                vTaskDelay(pdMS_TO_TICKS(20));
-            }
-            vTaskDelay(pdMS_TO_TICKS(50));
-
-            struct tm ntp_t;
-            if (WifiSync_SyncTimeOnce(&ntp_t, CLOCK_WIFI_SSID, CLOCK_WIFI_PASS, 15000, wifi_connected_cb, s_weather)) {
-                Pcf85063_SetTime(&ntp_t);
-                update_forecast_labels(s_weather);
-                update_sync_label(&ntp_t);
-                last_sync_hour = ntp_t.tm_hour;
-            }
-        }
 
         struct tm now;
         if (Pcf85063_GetTime(&now) != ESP_OK) {
@@ -267,41 +263,106 @@ static void clock_task(void *arg)
             continue;
         }
 
-        bool is_sync_hour = (now.tm_hour == SYNC_HOUR_1 || now.tm_hour == SYNC_HOUR_2);
+        bool button_pressed = (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO);
 
-        if (is_sync_hour && now.tm_min == 0 && last_sync_hour != now.tm_hour) {
-            ESP_LOGI(TAG, "Scheduled sync at %02d:00 (time + weather)...", now.tm_hour);
-            struct tm ntp_t;
-            if (WifiSync_SyncTimeOnce(&ntp_t, CLOCK_WIFI_SSID, CLOCK_WIFI_PASS, 15000, wifi_connected_cb, s_weather)) {
-                Pcf85063_SetTime(&ntp_t);
-                now = ntp_t;
-                update_sync_label(&now);
+        /* While the low battery notice is up it owns the screen - let it. */
+        if (button_pressed && !s_battery_warning_active) {
+            ESP_LOGI(TAG, "BOOT button pressed - toggling screen...");
+
+            while (gpio_get_level(KEY_BUTTON_PIN) == 0) {
+                vTaskDelay(pdMS_TO_TICKS(20));
             }
-            update_forecast_labels(s_weather);
-            last_sync_hour = now.tm_hour;
-        }
+            vTaskDelay(pdMS_TO_TICKS(50));
 
-        if (Shtc3_Read(&temperature, &humidity) != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to read SHTC3, keeping previous values.");
-        }
-        Battery_ReadVoltageMv(&battery_mv);
-
-        if (battery_mv > 0 && battery_mv <= BATTERY_CRITICAL_MV) {
-            enter_battery_protection_shutdown();
-        }
-
-        if (battery_mv > 0 && battery_mv <= BATTERY_WARNING_MV) {
-            show_battery_warning();
-            s_battery_warning_active = true;
-        } else {
-            if (s_battery_warning_active) {
-                if (Lvgl_lock(-1)) {
+            if (Lvgl_lock(-1)) {
+                if (s_on_calendar_screen) {
                     loadScreen(SCREEN_ID_MAIN);
-                    Lvgl_unlock();
+                    s_on_calendar_screen = false;
+                } else {
+                    loadScreen(SCREEN_ID_CALENDAR);
+                    update_calendar_display(&now);
+                    update_clock_hands(now.tm_hour, now.tm_min);
+                    s_last_cal_day = now.tm_mday;
+                    s_last_cal_mon = now.tm_mon;
+                    s_last_cal_min = now.tm_min;
+                    s_on_calendar_screen = true;
                 }
-                s_battery_warning_active = false;
+                Lvgl_Refresh();
+                Lvgl_unlock();
             }
-            update_labels(&now, temperature, humidity, battery_mv);
+        }
+
+        if (now.tm_min != last_minute) {
+            last_minute = now.tm_min;
+
+            bool is_sync_hour = (now.tm_hour == SYNC_HOUR_1 || now.tm_hour == SYNC_HOUR_2);
+
+            if (is_sync_hour && now.tm_min == 0 && last_sync_hour != now.tm_hour) {
+                ESP_LOGI(TAG, "Scheduled sync at %02d:00 (time + weather)...", now.tm_hour);
+                struct tm ntp_t;
+                if (WifiSync_SyncTimeOnce(&ntp_t, CLOCK_WIFI_SSID, CLOCK_WIFI_PASS, 15000, wifi_connected_cb, s_weather)) {
+                    Pcf85063_SetTime(&ntp_t);
+                    now = ntp_t;
+                    update_sync_label(&now);
+                }
+                update_forecast_labels(s_weather);
+                last_sync_hour = now.tm_hour;
+            }
+
+            if (Shtc3_Read(&temperature, &humidity) != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to read SHTC3, keeping previous values.");
+            }
+            Battery_ReadVoltageMv(&battery_mv);
+
+            if (battery_mv > 0 && battery_mv <= BATTERY_CRITICAL_MV) {
+                enter_battery_protection_shutdown();
+            }
+
+            if (battery_mv > 0 && battery_mv <= BATTERY_WARNING_MV) {
+                show_battery_warning();
+                s_battery_warning_active = true;
+            } else {
+                if (s_battery_warning_active) {
+                    s_battery_warning_active = false;
+                    /* Go back to whichever screen the user was on, not always main. */
+                    if (Lvgl_lock(-1)) {
+                        loadScreen(s_on_calendar_screen ? SCREEN_ID_CALENDAR : SCREEN_ID_MAIN);
+                        Lvgl_unlock();
+                    }
+                }
+                update_labels(&now, temperature, humidity, battery_mv);
+            }
+        }
+
+        /* Only touch the panel when something actually changed: every refresh
+           is a full 400x300 render plus a full SPI write (RENDER_MODE_FULL). */
+        if (Lvgl_lock(-1)) {
+            bool dirty = false;
+
+            if (s_battery_warning_active) {
+                /* the notice is static - nothing to redraw */
+            } else if (s_on_calendar_screen) {
+                if (now.tm_mday != s_last_cal_day || now.tm_mon != s_last_cal_mon) {
+                    update_calendar_display(&now);
+                    s_last_cal_day = now.tm_mday;
+                    s_last_cal_mon = now.tm_mon;
+                    dirty = true;
+                }
+                if (now.tm_min != s_last_cal_min) {
+                    update_clock_hands(now.tm_hour, now.tm_min);
+                    s_last_cal_min = now.tm_min;
+                    dirty = true;
+                }
+            } else {
+                s_colon_visible = !s_colon_visible;
+                lv_obj_set_style_opa(objects.obj2, s_colon_visible ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_DEFAULT);
+                dirty = true;
+            }
+
+            if (dirty) {
+                Lvgl_Refresh();
+            }
+            Lvgl_unlock();
         }
     }
 }
