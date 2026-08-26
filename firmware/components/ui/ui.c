@@ -18,7 +18,10 @@ static lv_obj_t *getLvglObjectFromIndex(int32_t index) {
 void loadScreen(enum ScreensEnum screenId) {
     currentScreen = screenId - 1;
     lv_obj_t *screen = getLvglObjectFromIndex(currentScreen);
-    lv_scr_load_anim(screen, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);
+    /* No fade: the panel is 1 bit, so every intermediate opacity frame
+       thresholds to a solid flash, and the manual refresh loop only runs
+       lv_timer_handler once per second so the animation stalls half way. */
+    lv_screen_load(screen);
 }
 
 void ui_init() {
