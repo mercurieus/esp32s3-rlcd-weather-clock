@@ -45,8 +45,13 @@ These shape every decision below and are easy to forget.
   edge. Anything time-based must be driven from that tick; LVGL timers do not
   run on their own because `lv_timer_handler()` is only called from
   `Lvgl_Refresh()`.
-- **Two usable GPIO buttons.** Select = `GPIO_NUM_18`, OK = `GPIO_NUM_0`. The
-  third case cutout is the PMU power button and is not software-readable.
+- **Two usable GPIO buttons.** Select = `GPIO_NUM_18`, OK = `GPIO_NUM_0`.
+  Confirmed, not assumed: the esp32s3-rlcd-smart-clock project on this same
+  board does `ButtonInput s_buttons(GPIO_NUM_18, GPIO_NUM_0)`. The third case
+  cutout is the PMU power button and is not software-readable.
+- **ES8311 output codec on the shared I2C bus**, I2S on MCLK `GPIO_NUM_16`,
+  BCLK `GPIO_NUM_9`, WS `GPIO_NUM_45`, DOUT `GPIO_NUM_8`, speaker PA enable
+  `GPIO_NUM_46`. The speaker itself plugs into a header and may not be fitted.
 
 ## Architecture
 
@@ -69,7 +74,7 @@ harbour bugs and the only piece that can be tested away from hardware.
 
 ```c
 #define BTN_OK_PIN      GPIO_NUM_0    /* BOOT, confirmed working */
-#define BTN_SELECT_PIN  GPIO_NUM_18   /* KEY - verify on bench, see Risks */
+#define BTN_SELECT_PIN  GPIO_NUM_18   /* KEY - confirmed against sibling board */
 ```
 
 Both configured input, pull-up, active low, with
@@ -270,6 +275,78 @@ Berlin, Kyiv, Moscow, Dubai, India, Bangkok, China, Japan, Sydney, New York,
 Chicago, Denver, Los Angeles). Default is the current
 `EET-2EEST,M3.5.0/3,M10.5.0/4`.
 
+## Chimes
+
+An old-clock chime, synthesised rather than sampled. Nothing is stored in
+flash: a struck bell is a handful of inharmonic partials with exponential
+decay, which is roughly twenty lines of arithmetic.
+
+### Timbre
+
+Each strike sums five partials at the classic bell ratios against the
+strike note, with higher partials decaying faster:
+
+| Partial | Ratio | Relative gain | Decay |
+|---|---|---|---|
+| hum | 0.5 | 0.30 | slowest |
+| fundamental (prime) | 1.0 | 1.00 | slow |
+| tierce | 1.2 | 0.50 | medium |
+| quint | 1.5 | 0.25 | fast |
+| nominal | 2.0 | 0.60 | fast |
+
+Output at 16 kHz mono, matching the sibling project's codec configuration.
+That is ample: the highest partial of the highest bell is under 900 Hz.
+
+### What plays
+
+Westminster quarters, in E major, on the four bells
+E4 329.63, F#4 369.99, G#4 415.30, B3 246.94:
+
+| Time | Phrase |
+|---|---|
+| :15 | G# F# E B |
+| :30 | E G# F# B, B F# G# E |
+| :45 | E G# F# B, B F# G# E, G# E F# B |
+| :00 | G# F# E B, B E F# G#, B F# G# E, G# E F# B, then the hour strike |
+
+**The hour strike is what makes each hour sound different**: a deeper bell
+(E3, 164.81 Hz) struck once at one o'clock through twelve times at twelve,
+roughly two seconds apart. This is what a grandfather clock does, and it is
+the classic way an hour is audibly identifiable without looking.
+
+Twelve o'clock therefore runs about 45 seconds. Playback lives on its own
+low-priority `chime_task` fed by a queue, so the one-second display tick and
+the second hand keep running throughout. Audio is generated in chunks and
+streamed to `esp_codec_dev_write`; a full phrase is never buffered whole.
+
+The PA on `GPIO_NUM_46` is enabled only for the duration of a phrase.
+
+### Settings rows
+
+- **Chimes** — Off / Hour strike only / Westminster + strike. Default **Off**,
+  because a speaker may not be fitted and an unexpected 45-second chime is a
+  poor first-boot experience.
+- **Quarter chimes** — Off / On. Only meaningful with Westminster selected.
+- **Quiet hours** — Off / 22:00-08:00 / 23:00-07:00 / custom start and end.
+  Default 22:00-08:00. Nothing chimes inside the window.
+- **Volume** — 0 to 100 in steps of 10, applied through the codec.
+- **Test chime** — an action row that plays a single strike, so the speaker
+  can be verified without waiting for an hour boundary.
+
+`settings_t` gains `chime_mode`, `chime_quarters`, `quiet_start`, `quiet_end`
+and `volume`, taken from the existing `reserved[7]` bytes, so the NVS version
+byte does not need to change.
+
+### Scheduling
+
+The existing one-second tick already knows the minute boundary. The chime
+scheduler fires when the minute changes to 00, 15, 30 or 45, is enabled for
+that quarter, and falls outside quiet hours. It queues a request and returns
+immediately.
+
+A missed boundary is never made up: if the device was asleep, resyncing or
+mid-chime, the request is dropped rather than played late.
+
 ## RTC stores UTC
 
 `wifi_sync.c:60-61` sets `TZ` then calls `localtime_r`, so `Pcf85063_SetTime()`
@@ -335,12 +412,15 @@ Each builds, flashes, and is verifiable on its own.
 4. Cal+Clock Vista redraw: dial with second hand, month browsing, day detail.
 5. Weather API extension and the sun/moon strip.
 6. Settings screen and NVS.
+7. Chimes: codec bring-up, bell synthesis, schedule, chime settings rows.
 
 ## Risks
 
-- **`GPIO_NUM_18` may not be the Select button.** Milestone 2 logs every GPIO
-  transition so this is confirmed on the bench before the rest is wired up.
-  If wrong, it is a one-line change.
+- **A speaker may not be fitted.** The board only provides a header. Chimes
+  default to off, the ES8311 is probed over I2C at boot, and if it does not
+  answer the chime rows render as "no audio hardware" rather than failing.
+- **Chime playback is long.** Westminster on the hour plus twelve strikes runs
+  around 45 s. It must not block the display tick, hence the dedicated task.
 - **LVGL 64 KB heap.** Settings rows, the hint overlay and the detail view all
   add objects. The Info page reports free LVGL heap so pressure is visible;
   if it becomes tight, the Settings list is the natural candidate for building
