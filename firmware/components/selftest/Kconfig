@@ -1,0 +1,11 @@
+menu "Clock self-test"
+
+config CLOCK_SELFTEST
+    bool "Run on-device self tests at boot"
+    default y
+    help
+        Runs assertion suites at boot, logs a summary over serial, then
+        continues into the normal application. Turn this off for release
+        builds.
+
+endmenu

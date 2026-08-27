@@ -8,6 +8,7 @@
 #include "user_config.h"
 #include "ui.h"
 #include "clock_task.h"
+#include "selftest.h"
 
 DisplayPort RlcdPort(12, 11, 5, 40, 41, LCD_WIDTH, LCD_HEIGHT);
 
@@ -29,6 +30,7 @@ static void Lvgl_FlushCallback(lv_display_t *drv, const lv_area_t *area, uint8_t
 
 extern "C" void app_main(void)
 {
+    Selftest_Run();
     RlcdPort.RLCD_Init();
     gpio_sleep_sel_dis(GPIO_NUM_12);
     gpio_sleep_sel_dis(GPIO_NUM_11);
