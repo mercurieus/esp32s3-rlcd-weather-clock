@@ -8,6 +8,7 @@
 #include "user_config.h"
 #include "ui.h"
 #include "clock_task.h"
+#include "clock_time.h"
 #include "selftest.h"
 
 DisplayPort RlcdPort(12, 11, 5, 40, 41, LCD_WIDTH, LCD_HEIGHT);
@@ -30,7 +31,14 @@ static void Lvgl_FlushCallback(lv_display_t *drv, const lv_area_t *area, uint8_t
 
 extern "C" void app_main(void)
 {
-    Selftest_Run();
+    /* main.cpp orchestrates every *_RunTests() suite directly: it is the
+       one place already required by everything, which keeps components
+       under test depending on selftest rather than the reverse. See the
+       comment on Selftest_End() in selftest.h. */
+    Selftest_Begin();
+    ClockTime_RunTests();
+    Selftest_End();
+
     RlcdPort.RLCD_Init();
     gpio_sleep_sel_dis(GPIO_NUM_12);
     gpio_sleep_sel_dis(GPIO_NUM_11);
