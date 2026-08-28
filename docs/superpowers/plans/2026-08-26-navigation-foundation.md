@@ -355,25 +355,49 @@ void ClockTime_RunTests(void)
     SELFTEST_CHECK_INT(memcmp(&utc, &before, sizeof(utc)), 0);
 
     /* Epoch of a known instant: 2026-08-26 19:03:00 UTC */
-    SELFTEST_CHECK_INT(ClockTime_UtcToEpoch(&before), 1787857380L);
+    SELFTEST_CHECK_INT(ClockTime_UtcToEpoch(&before), 1787770980L);
 }
 ```
 
-Register it in `firmware/components/selftest/selftest.c`: add `#include "clock_time.h"` near the top, and call `ClockTime_RunTests();` inside `Selftest_Run()` immediately after `test_harness_runs();`.
+Register it in `firmware/components/selftest/selftest.c` — but **not** via
+`#include "clock_time.h"` and not via adding `clock` to selftest's
+`PRIV_REQUIRES`. `clock` requires `main` (for `user_config.h`) and `main`
+requires `selftest`, so `selftest -> clock` closes a cycle:
+`selftest -> clock -> main -> selftest`. ESP-IDF's component build rejects
+that.
 
-Add the dependency in `firmware/components/selftest/CMakeLists.txt`:
+Instead, forward-declare the function and call it — the prototype only has
+to match; ESP-IDF links every component's objects into one binary regardless
+of the declared `REQUIRES` graph, so this resolves at link time with no
+header needed:
 
-```cmake
-idf_component_register(
-    SRCS "selftest.c"
-    INCLUDE_DIRS "."
-    PRIV_REQUIRES log clock
-)
+```c
+/* Forward-declared rather than pulled in via "clock_time.h": see the
+   comment above test_harness_runs for why. Defined in
+   components/clock/clock_time_test.c. */
+extern void ClockTime_RunTests(void);
 ```
+
+Add that near the top of `selftest.c`, inside the `#if CONFIG_CLOCK_SELFTEST`
+block, and call `ClockTime_RunTests();` inside `Selftest_Run()` immediately
+after `test_harness_runs();`. `firmware/components/selftest/CMakeLists.txt`
+does not change — it stays `PRIV_REQUIRES log`.
+
+This problem is specific to `clock`: it is the only component that needs
+`main` for a header. A later task's test suite (Task 5's `nav.c`, for
+instance) can very likely just add its own component to `selftest`'s
+`PRIV_REQUIRES` the straightforward way — `ui` does not require `main`, so
+`selftest -> ui` is not cyclic. Check the target component's own
+`PRIV_REQUIRES`/`REQUIRES` for `main` before assuming the straightforward
+path works; if it is there, use the forward-declare pattern instead.
 
 - [ ] **Step 2: Verify the epoch constant before trusting the test**
 
-The value `1787857380` must be independently confirmed, otherwise a wrong test bakes in a wrong implementation.
+The value in the test must be independently confirmed, otherwise a wrong test
+bakes in a wrong implementation. (This step exists for exactly this reason:
+the value that was first drafted here by hand — `1787857380` — was wrong by
+one full day, 86400s. Running the command below is what catches that, not
+eyeballing the arithmetic.)
 
 Run:
 
@@ -381,7 +405,8 @@ Run:
 python -c "import calendar,datetime; print(calendar.timegm(datetime.datetime(2026,8,26,19,3,0).timetuple()))"
 ```
 
-Expected: `1787857380`. If it differs, correct the constant in the test to the printed value before continuing.
+Expected: `1787770980`. If your test file has a different constant, correct
+it to the printed value before continuing.
 
 - [ ] **Step 3: Run the tests to verify they fail**
 

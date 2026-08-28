@@ -235,8 +235,18 @@ times are local.
 One scrolling list on its own screen. Select moves the row, OK cycles the
 value or runs the action, long Select exits.
 
-**Display** — time 24h/12h · date format `DD.MM.YYYY` / `YYYY-MM-DD` /
-`MM/DD/YYYY` · °C/°F · show seconds on/off · week starts Monday/Sunday
+**Display** — time 24h/12h · date format Weekday (`Fri 26 Aug`, default) /
+`DD.MM.YYYY` / `YYYY-MM-DD` / `MM/DD/YYYY` · °C/°F · show seconds on/off ·
+week starts Monday/Sunday
+
+The Weekday format is `EEE D MMM` in CLDR terms — abbreviated weekday, day,
+abbreviated month, no year — the pattern calendar apps use for a day header.
+It ships as the default because it is what the shared overlay's top bar
+actually shows (see the Cal+Clock mockup); the year is not lost, since the
+opened calendar's own heading carries it. `WEEKDAY_NAMES` already exists in
+`clock_task.c` for the forecast row; the top bar needs its 3-letter form,
+plus a 3-letter month table that does not yet exist anywhere in the
+firmware.
 
 **Time** — timezone from a preset POSIX-TZ table · sync hour 1 (0..23) ·
 sync hour 2 (0..23)
@@ -254,7 +264,7 @@ LVGL heap, internal heap, PSRAM · SSID and RSSI · last NTP sync · RTC state
 typedef struct {
     uint8_t version;
     uint8_t time_24h;         /* 0/1                                    */
-    uint8_t date_fmt;         /* 0 DD.MM.YYYY, 1 YYYY-MM-DD, 2 MM/DD/YY */
+    uint8_t date_fmt;         /* 0 Weekday, 1 DD.MM.YYYY, 2 YYYY-MM-DD, 3 MM/DD/YY */
     uint8_t temp_f;           /* 0/1                                    */
     uint8_t show_seconds;     /* 0/1                                    */
     uint8_t week_start_sun;   /* 0/1                                    */
@@ -266,9 +276,11 @@ typedef struct {
 ```
 
 Namespace `clock`, key `settings`, stored as a blob. Missing or mismatched
-version loads defaults and writes them back. Defaults match today's
-compile-time behaviour: 24h, `DD.MM.YYYY`, °C, seconds on, Monday, EET,
-05:00 / 15:00.
+version loads defaults and writes them back. Defaults: 24h, **Weekday date
+format**, °C, seconds on, Monday, EET, 05:00 / 15:00. This is the one default
+that changes device behaviour rather than preserving it — a deliberate choice,
+since the redesigned overlay is built around the shorter format and reverting
+to `DD.MM.YYYY` is one Settings press away.
 
 The TZ table holds roughly sixteen labelled POSIX strings (UTC, London,
 Berlin, Kyiv, Moscow, Dubai, India, Bangkok, China, Japan, Sydney, New York,
