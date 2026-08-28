@@ -62,36 +62,6 @@ void create_screen_main() {
     {
         lv_obj_t *parent_obj = obj;
         {
-            lv_obj_t *obj = lv_obj_create(parent_obj);
-            objects.obj0 = obj;
-            lv_obj_set_pos(obj, 329, 5);
-            lv_obj_set_size(obj, 64, 26);
-            lv_obj_set_style_pad_left(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_top(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_right(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_bottom(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_bg_opa(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_radius(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_border_color(obj, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_border_opa(obj, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_border_width(obj, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        {
-            lv_obj_t *obj = lv_obj_create(parent_obj);
-            objects.obj1 = obj;
-            lv_obj_set_pos(obj, 391, 10);
-            lv_obj_set_size(obj, 7, 16);
-            lv_obj_set_style_pad_left(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_top(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_right(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_bottom(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_bg_opa(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_radius(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_border_color(obj, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_border_opa(obj, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_border_width(obj, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        {
             // clock_hh1
             lv_obj_t *obj = lv_label_create(parent_obj);
             objects.clock_hh1 = obj;
@@ -115,18 +85,6 @@ void create_screen_main() {
         }
         {
             lv_obj_t *obj = lv_line_create(parent_obj);
-            objects.obj3 = obj;
-            lv_obj_set_pos(obj, 0, 34);
-            lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-            static lv_point_precise_t line_points[] = {
-                { 400, 0 },
-                { 0, 0 }
-            };
-            lv_line_set_points(obj, line_points, 2);
-            lv_obj_set_style_text_color(obj, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        {
-            lv_obj_t *obj = lv_line_create(parent_obj);
             objects.obj4 = obj;
             lv_obj_set_pos(obj, 0, 187);
             lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -136,49 +94,6 @@ void create_screen_main() {
             };
             lv_line_set_points(obj, line_points, 2);
             lv_obj_set_style_text_color(obj, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-        }
-        {
-            // temp
-            lv_obj_t *obj = lv_label_create(parent_obj);
-            objects.temp = obj;
-            lv_obj_set_pos(obj, 2, 3);
-            lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-            lv_obj_set_style_text_font(obj, &lv_font_montserrat_26, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_text_color(obj, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_label_set_text_static(obj, "00.0 C");
-        }
-        {
-            // hum
-            lv_obj_t *obj = lv_label_create(parent_obj);
-            objects.hum = obj;
-            lv_obj_set_pos(obj, 89, 3);
-            lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-            lv_obj_set_style_text_font(obj, &lv_font_montserrat_26, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_text_color(obj, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_label_set_text_static(obj, "00%");
-        }
-        {
-            // date
-            lv_obj_t *obj = lv_label_create(parent_obj);
-            objects.date = obj;
-            lv_obj_set_pos(obj, 163, 3);
-            lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-            lv_obj_set_style_text_font(obj, &lv_font_montserrat_26, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_text_color(obj, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_label_set_text_static(obj, "01.01.2000r.");
-        }
-        {
-            // battery
-            lv_obj_t *obj = lv_label_create(parent_obj);
-            objects.battery = obj;
-            lv_obj_set_pos(obj, 332, 3);
-            lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-            lv_obj_set_style_text_font(obj, &lv_font_montserrat_26, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_text_color(obj, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_text_align(obj, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_max_width(obj, 58, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_min_width(obj, 58, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_label_set_text_static(obj, "0.00");
         }
         {
             // clock_hh2
@@ -534,10 +449,6 @@ static const char *QUOTES[] = {
 #define CAL_QUOTE_Y       254
 
 static lv_obj_t *s_cal_cols[7];
-static lv_obj_t *s_cal_bar_temp;
-static lv_obj_t *s_cal_bar_hum;
-static lv_obj_t *s_cal_bar_date;
-static lv_obj_t *s_cal_bar_batt;
 static lv_obj_t *s_cal_fc_icon[4];
 static lv_obj_t *s_cal_fc_date[4];
 static lv_obj_t *s_cal_fc_temp[4];
@@ -588,21 +499,6 @@ static lv_obj_t *cal_add_label(lv_obj_t *parent, int x, int y, const lv_font_t *
     return l;
 }
 
-/* Mirrors the main screen top bar. LVGL objects cannot live on two screens,
-   so this is a second set of widgets fed by the same values. */
-static void create_calendar_top_bar(lv_obj_t *parent)
-{
-    cal_add_frame(parent, 329, 5, 64, 26);   /* battery body */
-    cal_add_frame(parent, 391, 10, 7, 16);   /* battery nub  */
-
-    s_cal_bar_temp = cal_add_label(parent, 2, 3, &lv_font_montserrat_26, 0, LV_TEXT_ALIGN_LEFT, "0.0");
-    s_cal_bar_hum  = cal_add_label(parent, 89, 3, &lv_font_montserrat_26, 0, LV_TEXT_ALIGN_LEFT, "0%");
-    s_cal_bar_date = cal_add_label(parent, 163, 3, &lv_font_montserrat_26, 0, LV_TEXT_ALIGN_LEFT, "01.01.2000");
-    s_cal_bar_batt = cal_add_label(parent, 332, 3, &lv_font_montserrat_26, 58, LV_TEXT_ALIGN_CENTER, "0.00");
-
-    cal_add_rule(parent, 0, 34, 400);
-}
-
 static void create_calendar_forecast_row(lv_obj_t *parent)
 {
     for (int i = 0; i < 4; i++) {
@@ -634,8 +530,6 @@ void create_screen_calendar() {
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(obj, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_all(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    create_calendar_top_bar(obj);
 
     objects.cal_title = cal_add_label(obj, 8, CAL_TITLE_Y, &lv_font_montserrat_16,
                                       0, LV_TEXT_ALIGN_LEFT, "Calendar");
@@ -705,15 +599,6 @@ void create_screen_calendar() {
     }
 
     tick_screen_calendar();
-}
-
-void calendar_update_top_bar(const char *temp, const char *hum, const char *date, const char *battery)
-{
-    if (!s_cal_bar_temp) return;
-    lv_label_set_text(s_cal_bar_temp, temp);
-    lv_label_set_text(s_cal_bar_hum, hum);
-    lv_label_set_text(s_cal_bar_date, date);
-    lv_label_set_text(s_cal_bar_batt, battery);
 }
 
 void calendar_update_forecast(int idx, const char *date, const lv_image_dsc_t *icon, const char *temp)

@@ -28,16 +28,9 @@ typedef struct _objects_t {
     lv_obj_t *clock_canvas;
     lv_obj_t *quote;
     lv_obj_t *info;
-    lv_obj_t *obj0;
-    lv_obj_t *obj1;
     lv_obj_t *clock_hh1;
     lv_obj_t *obj2;
-    lv_obj_t *obj3;
     lv_obj_t *obj4;
-    lv_obj_t *temp;
-    lv_obj_t *hum;
-    lv_obj_t *date;
-    lv_obj_t *battery;
     lv_obj_t *clock_hh2;
     lv_obj_t *clock_mm1;
     lv_obj_t *clock_mm2;
@@ -69,7 +62,6 @@ void tick_screen_calendar();
 
 void update_clock_hands(int hour, int minute);
 void update_calendar_display(const struct tm *ti);
-void calendar_update_top_bar(const char *temp, const char *hum, const char *date, const char *battery);
 void calendar_update_forecast(int idx, const char *date, const lv_image_dsc_t *icon, const char *temp);
 
 void tick_screen_by_id(enum ScreensEnum screenId);

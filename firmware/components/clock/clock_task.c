@@ -9,6 +9,7 @@
 #include "lvgl_bsp.h"
 #include "screens.h"
 #include "ui.h"
+#include "overlay.h"
 #include "user_config.h"
 #include "images.h"
 
@@ -147,13 +148,7 @@ static void update_labels(const struct tm *t, float temperature, float humidity,
         snprintf(date_buf, sizeof(date_buf), "%02d.%02d.%04d", t->tm_mday, t->tm_mon + 1, t->tm_year + 1900);
         snprintf(batt_buf, sizeof(batt_buf), "%d.%02d", battery_mv / 1000, (battery_mv % 1000) / 10);
 
-        lv_label_set_text(objects.temp, temp_buf);
-        lv_label_set_text(objects.hum, hum_buf);
-        lv_label_set_text(objects.date, date_buf);
-        lv_label_set_text(objects.battery, batt_buf);
-
-        /* the calendar screen carries its own copy of the top bar */
-        calendar_update_top_bar(temp_buf, hum_buf, date_buf, batt_buf);
+        Overlay_SetTopBar(temp_buf, hum_buf, date_buf, batt_buf);
 
         Lvgl_Refresh();
         Lvgl_unlock();
