@@ -1,5 +1,6 @@
 #include "clock_task.h"
 #include "clock_config.h"
+#include "clock_time.h"
 #include "pcf85063.h"
 #include "shtc3.h"
 #include "battery.h"
@@ -205,6 +206,7 @@ static void clock_task(void *arg)
 {
     set_status("Initializing...");
 
+    ClockTime_SetTimezone(CLOCK_TIMEZONE);
     WifiSync_Init();
     Pcf85063_Init((gpio_num_t)ESP32_I2C_SDA_PIN, (gpio_num_t)ESP32_I2C_SCL_PIN);
     Shtc3_Init(Pcf85063_GetBusHandle());
@@ -216,11 +218,12 @@ static void clock_task(void *arg)
         enter_battery_protection_shutdown();
     }
 
+    struct tm t_utc = {0};
     struct tm t = {0};
 
     set_status("Connecting to WiFi...");
     ESP_LOGI(TAG, "First time and weather sync over WiFi...");
-    if (!WifiSync_SyncTimeOnce(&t, CLOCK_WIFI_SSID, CLOCK_WIFI_PASS, 15000, wifi_connected_cb, s_weather)) {
+    if (!WifiSync_SyncTimeOnce(&t_utc, CLOCK_WIFI_SSID, CLOCK_WIFI_PASS, 15000, wifi_connected_cb, s_weather)) {
         ESP_LOGE(TAG, "No WiFi connection at startup - halting device.");
         set_status("Failed to connect to WiFi. Please reset the device.");
 
@@ -229,7 +232,8 @@ static void clock_task(void *arg)
         }
     }
 
-    Pcf85063_SetTime(&t);
+    Pcf85063_SetTime(&t_utc);          /* the RTC now holds UTC */
+    ClockTime_UtcToLocal(&t_utc, &t);  /* everything displayed is local */
     set_status("Time synced.");
     update_sync_label(&t);
     ESP_LOGI(TAG, "RTC set from NTP.");
@@ -257,11 +261,13 @@ static void clock_task(void *arg)
         esp_sleep_enable_timer_wakeup(1000000ULL);
         esp_light_sleep_start();
 
+        struct tm now_utc;
         struct tm now;
-        if (Pcf85063_GetTime(&now) != ESP_OK) {
+        if (Pcf85063_GetTime(&now_utc) != ESP_OK) {
             ESP_LOGW(TAG, "Failed to read RTC, skipping this cycle.");
             continue;
         }
+        ClockTime_UtcToLocal(&now_utc, &now);
 
         bool button_pressed = (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO);
 
@@ -299,10 +305,10 @@ static void clock_task(void *arg)
 
             if (is_sync_hour && now.tm_min == 0 && last_sync_hour != now.tm_hour) {
                 ESP_LOGI(TAG, "Scheduled sync at %02d:00 (time + weather)...", now.tm_hour);
-                struct tm ntp_t;
-                if (WifiSync_SyncTimeOnce(&ntp_t, CLOCK_WIFI_SSID, CLOCK_WIFI_PASS, 15000, wifi_connected_cb, s_weather)) {
-                    Pcf85063_SetTime(&ntp_t);
-                    now = ntp_t;
+                struct tm ntp_utc;
+                if (WifiSync_SyncTimeOnce(&ntp_utc, CLOCK_WIFI_SSID, CLOCK_WIFI_PASS, 15000, wifi_connected_cb, s_weather)) {
+                    Pcf85063_SetTime(&ntp_utc);
+                    ClockTime_UtcToLocal(&ntp_utc, &now);
                     update_sync_label(&now);
                 }
                 update_forecast_labels(s_weather);
