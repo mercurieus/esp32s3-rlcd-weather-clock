@@ -24,6 +24,12 @@ void Selftest_Begin(void);
    Selftest_End(), in that order. */
 void Selftest_End(void);
 
+/* Read the accumulated counts at any point - after Selftest_End() for the
+   final tally, or mid-run for a partial one. Useful wherever the result
+   needs to be shown or logged again later (a Settings/Info page, for
+   instance), not just once at boot. */
+void Selftest_GetCounts(int *checks, int *failures);
+
 void selftest_check(bool ok, const char *expr, const char *file, int line);
 void selftest_check_int(long actual, long expected, const char *expr,
                         const char *file, int line);

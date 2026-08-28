@@ -66,10 +66,17 @@ void Selftest_End(void)
              s_checks, s_failures);
 }
 
+void Selftest_GetCounts(int *checks, int *failures)
+{
+    *checks   = s_checks;
+    *failures = s_failures;
+}
+
 #else  /* !CONFIG_CLOCK_SELFTEST */
 
 void Selftest_Begin(void) {}
 void Selftest_End(void) {}
+void Selftest_GetCounts(int *checks, int *failures) { *checks = 0; *failures = 0; }
 void selftest_check(bool ok, const char *e, const char *f, int l)
 { (void)ok; (void)e; (void)f; (void)l; }
 void selftest_check_int(long a, long b, const char *e, const char *f, int l)

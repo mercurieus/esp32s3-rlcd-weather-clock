@@ -9,6 +9,7 @@
 #include "ui.h"
 #include "clock_task.h"
 #include "clock_time.h"
+#include "nav.h"
 #include "selftest.h"
 
 DisplayPort RlcdPort(12, 11, 5, 40, 41, LCD_WIDTH, LCD_HEIGHT);
@@ -37,6 +38,7 @@ extern "C" void app_main(void)
        comment on Selftest_End() in selftest.h. */
     Selftest_Begin();
     ClockTime_RunTests();
+    Nav_RunTests();
     Selftest_End();
 
     RlcdPort.RLCD_Init();
