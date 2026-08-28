@@ -57,9 +57,6 @@ void WifiSync_Init(void)
 
     s_event_group = xEventGroupCreate();
 
-    setenv("TZ", CLOCK_TIMEZONE, 1);
-    tzset();
-
     s_initialized = true;
 }
 
@@ -140,9 +137,9 @@ bool WifiSync_SyncTimeOnce(struct tm *out_time, const char *ssid, const char *pa
         if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(timeout_ms)) == ESP_OK) {
             time_t now;
             time(&now);
-            localtime_r(&now, out_time);
+            gmtime_r(&now, out_time);
             got_time = true;
-            ESP_LOGI(TAG, "Time fetched: %02d:%02d:%02d %02d-%02d-%04d",
+            ESP_LOGI(TAG, "Time fetched (UTC): %02d:%02d:%02d %02d-%02d-%04d",
                      out_time->tm_hour, out_time->tm_min, out_time->tm_sec,
                      out_time->tm_mday, out_time->tm_mon + 1, out_time->tm_year + 1900);
         } else {
