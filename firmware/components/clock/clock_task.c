@@ -191,14 +191,14 @@ static void update_forecast_labels(const WeatherDay days[4])
 static void configure_key_button_wakeup(void)
 {
     gpio_config_t key_cfg = {
-        .pin_bit_mask = 1ULL << KEY_BUTTON_PIN,
+        .pin_bit_mask = 1ULL << BTN_OK_PIN,
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&key_cfg);
-    gpio_wakeup_enable(KEY_BUTTON_PIN, GPIO_INTR_LOW_LEVEL);
+    gpio_wakeup_enable(BTN_OK_PIN, GPIO_INTR_LOW_LEVEL);
     esp_sleep_enable_gpio_wakeup();
 }
 
@@ -212,6 +212,7 @@ static void clock_task(void *arg)
     Shtc3_Init(Pcf85063_GetBusHandle());
     Battery_Init();
     configure_key_button_wakeup();
+
     int startup_battery_mv = 0;
     Battery_ReadVoltageMv(&startup_battery_mv);
     if (startup_battery_mv > 0 && startup_battery_mv <= BATTERY_CRITICAL_MV) {
@@ -275,7 +276,7 @@ static void clock_task(void *arg)
         if (button_pressed && !s_battery_warning_active) {
             ESP_LOGI(TAG, "BOOT button pressed - toggling screen...");
 
-            while (gpio_get_level(KEY_BUTTON_PIN) == 0) {
+            while (gpio_get_level(BTN_OK_PIN) == 0) {
                 vTaskDelay(pdMS_TO_TICKS(20));
             }
             vTaskDelay(pdMS_TO_TICKS(50));

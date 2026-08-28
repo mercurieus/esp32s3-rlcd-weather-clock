@@ -13,6 +13,8 @@
 
 #define ESP32_I2C_SDA_PIN   GPIO_NUM_13
 #define ESP32_I2C_SCL_PIN   GPIO_NUM_14
-#define KEY_BUTTON_PIN      GPIO_NUM_18
+
+#define BTN_OK_PIN          GPIO_NUM_0    /* BOOT  */
+#define BTN_SELECT_PIN      GPIO_NUM_18   /* KEY   */
 
 #endif
