@@ -15,6 +15,14 @@
 ## Global Constraints
 
 - **1-bit panel.** `Lvgl_FlushCallback` thresholds RGB565 at `0x7fff`. No grey exists. Every stroke must be pure black (`0x000000`) and at least 2 px wide.
+- **`components/ui/CMakeLists.txt` uses an explicit `SRCS` list, not a glob.** It
+  used to be `file(GLOB_RECURSE ui_srcs "*.c")`, which silently misses any new
+  `.c` file added without also touching `CMakeLists.txt` itself (a plain glob's
+  result is cached at configure time). `CONFIGURE_DEPENDS` looks like the fix
+  but ESP-IDF's component-discovery step runs in CMake script mode, where
+  `CONFIGURE_DEPENDS` is rejected outright - confirmed by trying it. When a
+  later task (or milestone) adds a new file under `components/ui/`, add it to
+  this list by hand.
 - **Refresh only when something changed.** `LV_DISPLAY_RENDER_MODE_FULL`: each `Lvgl_Refresh()` is a full 400x300 render, a 120000-iteration threshold loop, a 15 KB SPI write and a 50 ms delay.
 - **LVGL heap is 64 KB** (`CONFIG_LV_MEM_SIZE_KILOBYTES=64`, built-in allocator). Watch object count.
 - **LVGL timers do not run on their own.** `lv_timer_handler()` is only called from `Lvgl_Refresh()`. Anything time-based must be driven from the one-second task tick.

@@ -3,6 +3,7 @@
 #include "images.h"
 #include "actions.h"
 #include "vars.h"
+#include "overlay.h"
 
 #include <string.h>
 
@@ -26,6 +27,7 @@ void loadScreen(enum ScreensEnum screenId) {
 
 void ui_init() {
     create_screens();
+    Overlay_Create();
     loadScreen(SCREEN_ID_INIT);
 
 }
