@@ -93,6 +93,18 @@ height_(height)
     DisplayLen                = transfer >> 3;
     DispBuffer                = (uint8_t *) heap_caps_malloc(DisplayLen, MALLOC_CAP_SPIRAM);
     assert(DispBuffer);
+    /* Persistent scratch buffer for RLCD_DisplayWindow(), sized to the
+       full-panel worst case. Reused across calls rather than malloc/free
+       per send - RLCD_Sendbuffera() queues an async DMA transfer and
+       returns immediately, so freeing a buffer right after queuing it
+       would race the still-in-flight send (this is the exact bug the
+       windowed-refresh spike's own diagnostic code hit). Safe to reuse
+       for the same reason DispBuffer itself already is: the next batch's
+       RLCD_WaitTransferDone() (called before that batch's first pixel
+       write) guarantees any previous transfer has completed before either
+       buffer is touched again. */
+    WindowBuffer               = (uint8_t *) heap_caps_malloc(DisplayLen, MALLOC_CAP_SPIRAM);
+    assert(WindowBuffer);
 
 #if (AlgorithmOptimization == 3)
     PixelIndexLUT = (uint16_t (*)[300])heap_caps_malloc(transfer * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
@@ -261,6 +273,39 @@ void DisplayPort::RLCD_Display() {
     RLCD_SendCommand(0x2c);
 
     RLCD_Sendbuffera(DispBuffer, DisplayLen);
+}
+
+/* Sends a windowed sub-rectangle instead of the full panel. x1/y1/x2/y2 are
+   inclusive screen-space coordinates; RLCD_ComputeWindow() rounds them to a
+   valid CASET/RASET window and the matching payload length - see that
+   function for the addressing math. Writes into the persistent
+   WindowBuffer (not a fresh allocation - see the constructor) so it needs
+   no wait of its own: like RLCD_Display(), it queues an async send and
+   relies on the caller's existing wait/send discipline (Task 1's
+   RLCD_WaitTransferDone(), called at the start of the next batch) before
+   either buffer is touched again. */
+void DisplayPort::RLCD_DisplayWindow(int x1, int y1, int x2, int y2) {
+    RlcdWindow w = RLCD_ComputeWindow(width_, height_, x1, y1, x2, y2);
+
+    int H4 = height_ >> 2;
+    int by_start = (42 - w.caset_xe) * 3;
+    int run_len  = (w.caset_xe - w.caset_xs + 1) * 3;
+    int cursor = 0;
+    for (int bx = w.raset_ys; bx <= w.raset_ye; bx++) {
+        memcpy(WindowBuffer + cursor, &DispBuffer[bx * H4 + by_start], run_len);
+        cursor += run_len;
+    }
+
+    RLCD_SendCommand(0x2A);
+    RLCD_SendData(w.caset_xs);
+    RLCD_SendData(w.caset_xe);
+
+    RLCD_SendCommand(0x2B);
+    RLCD_SendData(w.raset_ys);
+    RLCD_SendData(w.raset_ye);
+
+    RLCD_SendCommand(0x2c);
+    RLCD_Sendbuffera(WindowBuffer, w.len);
 }
 
 void DisplayPort::RLCD_Reset(void) {
