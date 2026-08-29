@@ -8,7 +8,8 @@ static lv_obj_t *s_date;
 static lv_obj_t *s_battery;
 static lv_obj_t *s_focus;
 static lv_obj_t *s_hint_box;
-static lv_obj_t *s_hint_label;
+static lv_obj_t *s_hint_key_label;
+static lv_obj_t *s_hint_boot_label;
 static uint32_t  s_hint_until_ms;
 static bool      s_hint_visible;
 
@@ -59,6 +60,29 @@ static lv_obj_t *overlay_label(lv_obj_t *parent, int x, int y, int width,
     return l;
 }
 
+/* A small inverted badge: black box, white text. Marks which physical
+   button ("Key" or "Boot") a hint line refers to, so it reads at a glance
+   instead of requiring the sentence to be parsed first. Sized to its
+   parent row and left un-positioned - the row's flex layout places it. */
+static lv_obj_t *overlay_badge(lv_obj_t *parent, int w, int h, const char *text)
+{
+    lv_obj_t *o = lv_obj_create(parent);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(o, w, h);
+    lv_obj_set_style_pad_all(o, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(o, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(o, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(o, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lv_obj_t *l = lv_label_create(o);
+    lv_obj_center(l);
+    lv_obj_set_style_text_font(l, &lv_font_montserrat_12, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(l, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_label_set_text_static(l, text);
+    return o;
+}
+
 void Overlay_Create(void)
 {
     lv_obj_t *top = lv_layer_top();
@@ -96,28 +120,45 @@ void Overlay_Create(void)
     lv_obj_set_style_border_width(s_focus, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_add_flag(s_focus, LV_OBJ_FLAG_HIDDEN);
 
-    /* Hint overlay: white box with a black outline, bottom centre. */
+    /* Hint overlay: white box with a black outline, bottom centre. One
+       line, one fixed sequence - "Key" (Select) badge+text then "Boot"
+       (OK) badge+text, the silkscreen names, not the abstract role names.
+       Flex row layout centres each badge against its text on the same
+       baseline regardless of font metrics, instead of guessed offsets. */
     s_hint_box = lv_obj_create(top);
     lv_obj_remove_flag(s_hint_box, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_pos(s_hint_box, 40, 252);
-    lv_obj_set_size(s_hint_box, 320, 40);
+    lv_obj_set_pos(s_hint_box, 8, 268);
+    lv_obj_set_size(s_hint_box, 384, 28);
     lv_obj_set_style_pad_all(s_hint_box, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(s_hint_box, 4, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(s_hint_box, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_radius(s_hint_box, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_color(s_hint_box, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(s_hint_box, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_color(s_hint_box, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_opa(s_hint_box, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(s_hint_box, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_flex_flow(s_hint_box, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(s_hint_box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_add_flag(s_hint_box, LV_OBJ_FLAG_HIDDEN);
 
-    s_hint_label = lv_label_create(s_hint_box);
-    lv_obj_set_pos(s_hint_label, 4, 4);
-    lv_obj_set_size(s_hint_label, 308, 32);
-    lv_label_set_long_mode(s_hint_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_font(s_hint_label, &lv_font_montserrat_12, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_color(s_hint_label, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_align(s_hint_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_label_set_text_static(s_hint_label, "");
+    overlay_badge(s_hint_box, 36, 18, "Key");
+
+    s_hint_key_label = lv_label_create(s_hint_box);
+    lv_obj_set_width(s_hint_key_label, LV_SIZE_CONTENT);
+    lv_obj_set_height(s_hint_key_label, LV_SIZE_CONTENT);
+    lv_obj_set_style_text_font(s_hint_key_label, &lv_font_montserrat_12, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(s_hint_key_label, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_label_set_text_static(s_hint_key_label, "");
+
+    overlay_badge(s_hint_box, 36, 18, "Boot");
+
+    s_hint_boot_label = lv_label_create(s_hint_box);
+    lv_obj_set_width(s_hint_boot_label, LV_SIZE_CONTENT);
+    lv_obj_set_height(s_hint_boot_label, LV_SIZE_CONTENT);
+    lv_obj_set_style_text_font(s_hint_boot_label, &lv_font_montserrat_12, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(s_hint_boot_label, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_label_set_text_static(s_hint_boot_label, "");
 
     lv_mem_monitor_t mon;
     lv_mem_monitor(&mon);
@@ -152,12 +193,14 @@ void Overlay_ShowFocus(const lv_area_t *area)
     lv_obj_remove_flag(s_focus, LV_OBJ_FLAG_HIDDEN);
 }
 
-void Overlay_ShowHint(const char *text, uint32_t now_ms, uint32_t duration_ms)
+void Overlay_ShowHint(const char *key_text, const char *boot_text,
+                      uint32_t now_ms, uint32_t duration_ms)
 {
     if (!s_hint_box) {
         return;
     }
-    lv_label_set_text(s_hint_label, text);
+    lv_label_set_text(s_hint_key_label, key_text);
+    lv_label_set_text(s_hint_boot_label, boot_text);
     lv_obj_remove_flag(s_hint_box, LV_OBJ_FLAG_HIDDEN);
     s_hint_visible  = true;
     s_hint_until_ms = now_ms + duration_ms;

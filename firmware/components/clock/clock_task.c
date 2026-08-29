@@ -10,6 +10,8 @@
 #include "screens.h"
 #include "ui.h"
 #include "overlay.h"
+#include "buttons.h"
+#include "nav.h"
 #include "user_config.h"
 #include "images.h"
 
@@ -29,10 +31,17 @@ static const char *WEEKDAY_NAMES[7] = { "Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"
 static WeatherDay s_weather[4];
 static bool s_battery_warning_active = false;
 static bool s_colon_visible = true;
-static bool s_on_calendar_screen = false;
 static int s_last_cal_day = -1;
 static int s_last_cal_mon = -1;
 static int s_last_cal_min = -1;
+
+#define HINT_BOOT_MS   5000
+#define HINT_EVENT_MS  2500
+
+static nav_state_t s_nav;
+
+/* 0xFF means "unknown", which forces the next apply_nav_visuals() to load. */
+static uint8_t s_loaded_screen = 0xFF;
 
 typedef enum { WICON_SUNNY, WICON_PARTLY_CLOUDY, WICON_CLOUDY, WICON_RAINY, WICON_SNOWY, WICON_STORM } WeatherIcon;
 
@@ -42,6 +51,7 @@ static void show_battery_warning(void)
         loadScreen(SCREEN_ID_INIT);
         lv_label_set_text(objects.info, "Battery low.\nPlease charge the device.");
         Lvgl_Refresh();
+        s_loaded_screen = 0xFF;
         Lvgl_unlock();
     }
 }
@@ -183,18 +193,82 @@ static void update_forecast_labels(const WeatherDay days[4])
     }
 }
 
-static void configure_key_button_wakeup(void)
+/* Main has five focusables; Cal+Clock gets its own in milestone 4. */
+static uint8_t nav_focus_count(uint8_t screen)
 {
-    gpio_config_t key_cfg = {
-        .pin_bit_mask = 1ULL << BTN_OK_PIN,
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    gpio_config(&key_cfg);
-    gpio_wakeup_enable(BTN_OK_PIN, GPIO_INTR_LOW_LEVEL);
-    esp_sleep_enable_gpio_wakeup();
+    return screen == NAV_SCREEN_MAIN ? 5 : 0;
+}
+
+static uint32_t now_ms(void)
+{
+    return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+/* One short verb per physical button - "Key" and "Boot" are the board's own
+   silkscreen names, shown in the overlay's inverted badges, not the
+   abstract Select/OK role names - with the long-press action parenthesised
+   only where it differs from the short-press one. Either field may be
+   empty when that button does nothing in the current mode. */
+typedef struct {
+    const char *key;
+    const char *boot;
+} hint_text_t;
+
+static hint_text_t hint_for_mode(const nav_state_t *st)
+{
+    switch (st->mode) {
+    case NAV_SCREEN:
+        return st->screen == NAV_SCREEN_MAIN
+            ? (hint_text_t){ "Calendar", "Open (hold: Settings)" }
+            : (hint_text_t){ "Clock", "Open (hold: Settings)" };
+    case NAV_FOCUS:
+        /* OK_LONG reaches Settings from every mode but Settings itself
+           (see nav_handle's top check) - Focus is no exception. */
+        return (hint_text_t){ "Next (hold: Back)", "Details (hold: Settings)" };
+    case NAV_DETAIL:
+        /* Key has no short-press action here - only its hold, which lands
+           on the same place as Boot's short press. */
+        return (hint_text_t){ "(hold: Back)", "Back (hold: Settings)" };
+    case NAV_SETTINGS:
+        /* Key's hold is the actual exit; OK_LONG is a no-op while already
+           in Settings (nav_handle's top check bails out), so Boot gets no
+           hold note here. */
+        return (hint_text_t){ "Next (hold: Exit)", "Change" };
+    }
+    return (hint_text_t){ "", "" };
+}
+
+/* Absolute screen rectangles for Main's focusable elements. Index 0 is the
+   indoor sensor in the shared top bar; 1..4 are the forecast days. */
+static void main_focus_area(uint8_t index, lv_area_t *out)
+{
+    if (index == 0) {
+        out->x1 = 0;   out->y1 = 0;   out->x2 = 158; out->y2 = 33;
+        return;
+    }
+    const int col = (index - 1) * 100;
+    out->x1 = col;       out->y1 = 190;
+    out->x2 = col + 99;  out->y2 = 283;
+}
+
+static void apply_nav_visuals(void)
+{
+    /* Only load on an actual screen change. Focus moves must not reload the
+       screen, or every Select press would rebuild and flicker it. */
+    if (s_loaded_screen != s_nav.screen) {
+        loadScreen(s_nav.screen == NAV_SCREEN_MAIN
+                       ? SCREEN_ID_MAIN
+                       : SCREEN_ID_CALENDAR);
+        s_loaded_screen = s_nav.screen;
+    }
+
+    if (s_nav.mode == NAV_FOCUS && s_nav.screen == NAV_SCREEN_MAIN) {
+        lv_area_t a;
+        main_focus_area(s_nav.focus, &a);
+        Overlay_ShowFocus(&a);
+    } else {
+        Overlay_ShowFocus(NULL);
+    }
 }
 
 static void clock_task(void *arg)
@@ -206,7 +280,6 @@ static void clock_task(void *arg)
     Pcf85063_Init((gpio_num_t)ESP32_I2C_SDA_PIN, (gpio_num_t)ESP32_I2C_SCL_PIN);
     Shtc3_Init(Pcf85063_GetBusHandle());
     Battery_Init();
-    configure_key_button_wakeup();
 
     int startup_battery_mv = 0;
     Battery_ReadVoltageMv(&startup_battery_mv);
@@ -251,6 +324,17 @@ static void clock_task(void *arg)
         Lvgl_unlock();
     }
 
+    Buttons_Init(BTN_SELECT_PIN, BTN_OK_PIN);
+    Buttons_EnableWakeup();
+    nav_init(&s_nav, nav_focus_count, 1);
+
+    if (Lvgl_lock(-1)) {
+        hint_text_t h = hint_for_mode(&s_nav);
+        Overlay_ShowHint(h.key, h.boot, now_ms(), HINT_BOOT_MS);
+        Lvgl_Refresh();
+        Lvgl_unlock();
+    }
+
     int last_sync_hour = -1;
     int last_minute = -1;
     for (;;) {
@@ -265,32 +349,34 @@ static void clock_task(void *arg)
         }
         ClockTime_UtcToLocal(&now_utc, &now);
 
-        bool button_pressed = (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO);
+        bool button_pressed = Buttons_PressPending();
 
-        /* While the low battery notice is up it owns the screen - let it. */
-        if (button_pressed && !s_battery_warning_active) {
-            ESP_LOGI(TAG, "BOOT button pressed - toggling screen...");
-
-            while (gpio_get_level(BTN_OK_PIN) == 0) {
-                vTaskDelay(pdMS_TO_TICKS(20));
-            }
-            vTaskDelay(pdMS_TO_TICKS(50));
-
-            if (Lvgl_lock(-1)) {
-                if (s_on_calendar_screen) {
-                    loadScreen(SCREEN_ID_MAIN);
-                    s_on_calendar_screen = false;
-                } else {
-                    loadScreen(SCREEN_ID_CALENDAR);
-                    update_calendar_display(&now);
-                    update_clock_hands(now.tm_hour, now.tm_min);
-                    s_last_cal_day = now.tm_mday;
-                    s_last_cal_mon = now.tm_mon;
-                    s_last_cal_min = now.tm_min;
-                    s_on_calendar_screen = true;
+        if (button_pressed) {
+            /* Always drain the press even while the battery notice owns
+               the screen: Buttons_ReadEvent() is what re-enables that
+               pin's interrupt, so skipping it here would leave the pin
+               permanently disabled after the first touch during the
+               notice. Only the nav/UI reaction below is gated. */
+            const btn_event_t ev = Buttons_ReadEvent();
+            if (ev != BTN_EV_NONE && !s_battery_warning_active) {
+                const bool changed = nav_handle(&s_nav, ev);
+                if (Lvgl_lock(-1)) {
+                    if (changed) {
+                        apply_nav_visuals();
+                        if (s_nav.mode == NAV_SCREEN &&
+                            s_nav.screen == NAV_SCREEN_CALCLOCK) {
+                            update_calendar_display(&now);
+                            update_clock_hands(now.tm_hour, now.tm_min);
+                            s_last_cal_day = now.tm_mday;
+                            s_last_cal_mon = now.tm_mon;
+                            s_last_cal_min = now.tm_min;
+                        }
+                    }
+                    hint_text_t h = hint_for_mode(&s_nav);
+                    Overlay_ShowHint(h.key, h.boot, now_ms(), HINT_EVENT_MS);
+                    Lvgl_Refresh();
+                    Lvgl_unlock();
                 }
-                Lvgl_Refresh();
-                Lvgl_unlock();
             }
         }
 
@@ -328,7 +414,7 @@ static void clock_task(void *arg)
                     s_battery_warning_active = false;
                     /* Go back to whichever screen the user was on, not always main. */
                     if (Lvgl_lock(-1)) {
-                        loadScreen(s_on_calendar_screen ? SCREEN_ID_CALENDAR : SCREEN_ID_MAIN);
+                        apply_nav_visuals();
                         Lvgl_unlock();
                     }
                 }
@@ -339,11 +425,11 @@ static void clock_task(void *arg)
         /* Only touch the panel when something actually changed: every refresh
            is a full 400x300 render plus a full SPI write (RENDER_MODE_FULL). */
         if (Lvgl_lock(-1)) {
-            bool dirty = false;
+            bool dirty = Overlay_TickHint(now_ms());
 
             if (s_battery_warning_active) {
                 /* the notice is static - nothing to redraw */
-            } else if (s_on_calendar_screen) {
+            } else if (s_nav.screen == NAV_SCREEN_CALCLOCK) {
                 if (now.tm_mday != s_last_cal_day || now.tm_mon != s_last_cal_mon) {
                     update_calendar_display(&now);
                     s_last_cal_day = now.tm_mday;
