@@ -56,6 +56,7 @@ class DisplayPort {
     int                 width_;
     int                 height_;
     uint8_t            *DispBuffer = NULL;
+    uint8_t            *WindowBuffer = NULL;
     int                 DisplayLen;
     SemaphoreHandle_t xfer_done_ = NULL;
     static bool on_color_trans_done(esp_lcd_panel_io_handle_t panel_io,
@@ -80,6 +81,7 @@ class DisplayPort {
     void RLCD_Init();
     void RLCD_ColorClear(uint8_t color);
     void RLCD_Display();
+    void RLCD_DisplayWindow(int x1, int y1, int x2, int y2);
     void RLCD_WaitTransferDone();
     #if (AlgorithmOptimization != 3)
     void RLCD_SetPortraitPixel(uint16_t x, uint16_t y, uint8_t color);
