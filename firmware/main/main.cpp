@@ -68,6 +68,7 @@ extern "C" void app_main(void)
     Selftest_Begin();
     ClockTime_RunTests();
     Nav_RunTests();
+    DisplayBsp_RunTests();
     Selftest_End();
 
     RlcdPort.RLCD_Init();

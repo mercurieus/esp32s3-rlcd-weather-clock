@@ -4,6 +4,42 @@
 #include <esp_log.h>
 #include "display_bsp.h"
 
+RlcdWindow RLCD_ComputeWindow(int width, int height, int x1, int y1, int x2, int y2)
+{
+    /* Clamp to panel bounds first - defensive against any caller passing
+       out-of-range LVGL coordinates. */
+    if (x1 < 0) x1 = 0;
+    if (y1 < 0) y1 = 0;
+    if (x2 > width - 1)  x2 = width - 1;
+    if (y2 > height - 1) y2 = height - 1;
+
+    /* X (RASET): 2px/unit, no inversion. */
+    uint8_t rs = (uint8_t)(x1 >> 1);
+    uint8_t re = (uint8_t)(x2 >> 1);
+
+    /* Y (CASET): 12px/unit (3 InitLandscapeLUT() block_y groups of 4 rows
+       each), Y-inverted via inv_y = height-1-y, and CASET *decreases* as
+       screen-Y increases (hardware-confirmed: CASET's low end measured at
+       the top of the screen, where inv_y/block_y is largest). */
+    int inv_y1 = height - 1 - y1;
+    int inv_y2 = height - 1 - y2;
+    int by_a = inv_y1 >> 2;
+    int by_b = inv_y2 >> 2;
+    int by_lo = (by_a < by_b) ? by_a : by_b;
+    int by_hi = (by_a > by_b) ? by_a : by_b;
+    int g_lo = by_lo / 3;   /* integer division already expands to the
+                                enclosing 12px-aligned band */
+    int g_hi = by_hi / 3;
+
+    RlcdWindow w;
+    w.caset_xs = (uint8_t)(42 - g_hi);   /* larger block_y group -> smaller CASET */
+    w.caset_xe = (uint8_t)(42 - g_lo);   /* smaller block_y group -> larger CASET */
+    w.raset_ys = rs;
+    w.raset_ye = re;
+    w.len = (int)(w.caset_xe - w.caset_xs + 1) * (int)(w.raset_ye - w.raset_ys + 1) * 3;
+    return w;
+}
+
 DisplayPort::DisplayPort(int mosi, int scl, int dc, int cs, int rst, int width, int height, spi_host_device_t spihost) :
 mosi_(mosi),
 scl_(scl),

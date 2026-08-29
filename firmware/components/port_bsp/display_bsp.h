@@ -15,6 +15,33 @@ enum ColorSelection {
     ColorWhite = 0xff
 };
 
+/* A windowed CASET/RASET/payload-length triple, computed by
+   RLCD_ComputeWindow() from a screen-space rectangle. Both the SPI command
+   bytes and the payload-extraction loop that use this are driven from one
+   RlcdWindow value so they can never compute mismatched sizes - an
+   undersized RAMWR payload does not fail gracefully on this panel, it
+   leaves visible garbage (hardware-confirmed). See
+   docs/superpowers/specs/2026-08-30-windowed-partial-refresh-design.md. */
+struct RlcdWindow {
+    uint8_t caset_xs;
+    uint8_t caset_xe;
+    uint8_t raset_ys;
+    uint8_t raset_ye;
+    int     len;
+};
+
+/* Pure function (no DisplayPort instance needed) so it's directly unit
+   testable - see display_bsp_test.cpp. width/height are the panel's pixel
+   dimensions (400/300 on this hardware). x1/y1/x2/y2 is an inclusive
+   screen-space rectangle; out-of-range values are clamped internally to
+   [0,width-1]x[0,height-1]. Always expands the rect to the nearest valid
+   CASET/RASET-addressable window (12px vertical granularity, 2px
+   horizontal), never shrinks it - so a computed window may cover a few
+   extra pixels beyond what was asked for, never fewer. */
+RlcdWindow RLCD_ComputeWindow(int width, int height, int x1, int y1, int x2, int y2);
+
+void DisplayBsp_RunTests(void);
+
 class DisplayPort {
   private:
     esp_lcd_panel_io_handle_t io_handle = NULL;
