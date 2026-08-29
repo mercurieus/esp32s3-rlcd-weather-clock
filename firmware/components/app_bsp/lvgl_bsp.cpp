@@ -50,7 +50,14 @@ void Lvgl_PortInit(int width, int height, DispFlushCb flush_cb)
     assert(buffer_1);
     assert(buffer_2);
 
-    lv_display_set_buffers(disp, buffer_1, buffer_2, buffer_size, LV_DISPLAY_RENDER_MODE_FULL);
+    /* PARTIAL: LVGL re-renders only the invalidated rectangle each refresh,
+       not the whole tree - the colon blink alone used to force a full
+       400x300 composite every second. RLCD_Display() still ships the
+       entire packed panel buffer over SPI regardless (its column/row
+       addressing is fixed-window, see the comment there), so this saves
+       CPU time, not SPI time; a tick with two unrelated dirty rects now
+       costs two full SPI sends instead of one. */
+    lv_display_set_buffers(disp, buffer_1, buffer_2, buffer_size, LV_DISPLAY_RENDER_MODE_PARTIAL);
 
     s_last_tick_us = esp_timer_get_time();
 

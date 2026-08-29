@@ -190,6 +190,12 @@ void DisplayPort::RLCD_ColorClear(uint8_t color) {
     memset(DispBuffer, color, DisplayLen);
 }
 
+/* Always ships the whole packed panel buffer, fixed to the full-screen
+   column/row window - it does not know or care which pixels actually
+   changed. Windowing this to an arbitrary sub-rectangle would need the
+   panel's column/row addressing worked out against its packing (see
+   RLCD_SetLandscapePixel), which isn't documented anywhere in this repo;
+   left as a full send rather than guess at that on real hardware. */
 void DisplayPort::RLCD_Display() {
     RLCD_SendCommand(0x2A);
     RLCD_SendData(0x12);
