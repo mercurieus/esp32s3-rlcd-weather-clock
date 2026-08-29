@@ -81,22 +81,34 @@ double-buffered, so the delay is what currently prevents the next refresh's
 `RLCD_SetPixel` calls from mutating a buffer whose previous contents are
 still being DMA'd out — a real, if accidental, safety mechanism.
 
-**Change.** Register `on_color_trans_done` in `esp_lcd_panel_io_spi_config_t`
-(`components/port_bsp/display_bsp.cpp:28`), backed by a counting or binary
-FreeRTOS semaphore signalled from that callback. `RLCD_Display()` waits on it
-before returning, rather than the caller sleeping a fixed 50 ms afterward.
-Concretely:
+**Change.** Register `on_color_trans_done` via
+`esp_lcd_panel_io_register_event_callbacks()` (not a field on the SPI IO
+config — it's registered separately, see `esp_lcd_types.h`), backed by a
+binary FreeRTOS semaphore signalled from that callback.
+
+**Where the wait actually has to go is the subtle part.** Waiting at the top
+of `RLCD_Display()` — the first design considered here — is too late: by the
+time `RLCD_Display()` is called, `Lvgl_FlushCallback` has *already* written
+this frame's pixels into `DispBuffer` via `RLCD_SetPixel`, so a still-in-
+flight previous transfer could already have raced against those writes
+before anyone waited for anything. The wait must happen **before the pixel
+writes**, not before the send. Concretely:
 
 - `DisplayPort` gains a `SemaphoreHandle_t xfer_done_` member: a **binary**
   semaphore (only "is a transfer outstanding" matters, never a count),
   created in the constructor and given once immediately so the first call
   doesn't block forever waiting for a transfer that never started.
-- `io_config.on_color_trans_done` is set to a small static trampoline that
-  gives the semaphore from `user_ctx` (the `DisplayPort*`).
-- `RLCD_Display()` takes the semaphore (blocking) as its **first** step —
-  this waits for the *previous* transfer to finish, guaranteeing `DispBuffer`
-  is safe to have been mutated by the caller's `RLCD_SetPixel` calls that
-  already happened before this call — then sends the new buffer.
+- A new public method, `void RLCD_WaitTransferDone()`, blocks on it.
+- The registered callback gives the semaphore from ISR context
+  (`xSemaphoreGiveFromISR`).
+- `Lvgl_FlushCallback` (`main/main.cpp:17`) calls `RlcdPort.RLCD_WaitTransferDone()`
+  as its **first statement**, before its `RLCD_SetPixel` loop — this is what
+  actually closes the race, for both the ordinary case and `PARTIAL` render
+  mode's multiple flush calls per refresh (each flush's writes wait for
+  whatever the *previous* flush's `RLCD_Display()` kicked off, whether that
+  was in this refresh cycle or the last one).
+- `RLCD_Display()` itself is otherwise unchanged — it sends immediately,
+  trusting the caller already waited before writing.
 - `Lvgl_Refresh()` drops its `vTaskDelay(50)` entirely.
 
 This still blocks the caller — `DispBuffer` being single-buffered means it
@@ -182,6 +194,12 @@ shared top bar's four readings (temp, humidity, date, battery) sink into the
 rail as recessed white plaques — dark edge top-left, light edge
 bottom-right — which is what keeps their text off the dither per the hard
 rule above.
+
+**The header rail is `components/ui/overlay.c`'s shared top bar** — on
+`lv_layer_top()`, so this reaches Main too, not just Cal+Clock. Confirmed
+with the user: one visual language for both screens, not a Cal+Clock-only
+treatment. The dial bezel and month buttons remain Cal+Clock-only, in
+`screens.c`.
 
 **Hardware verification required before committing to this.** The mockup's
 dither assumes the panel renders isolated single pixels cleanly; if adjacent
