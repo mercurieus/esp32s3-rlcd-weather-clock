@@ -38,8 +38,8 @@ and noted for their own future spec:
 - Redraw the existing Cal+Clock screen after the Windows Vista/7 taskbar
   clock flyout: plain analog dial with a working second hand, month
   calendar grid, metal-styled header/bezel/buttons via dithering.
-- Stage the day-detail overlay's layout for the rain/wind fields milestone 5
-  will add, without having to redo that layout later.
+- Working month browsing via the `<`/`>` arrows, replacing the parent
+  spec's per-day focus (see "Month browsing" below for why).
 - Replace the SPI flush path's blind `vTaskDelay(50)` with an accurate wait
   on the transfer's actual completion.
 
@@ -197,19 +197,46 @@ JavaScript, not yet transcribed into tables here — the implementation plan
 must derive and record these the same way the rest of this document does,
 not eyeball them from the mockup.
 
-## Day detail overlay
+## Month browsing (revises the parent spec)
 
-OK on a focused calendar day opens: weekday, ISO week number, day of year,
-days from today — unchanged from the parent spec.
+The parent spec gave Cal+Clock per-day focus (1..N days) with wrap-forward
+into the next month and wrap-backward into the previous, plus a day-detail
+overlay (weekday, ISO week, day of year, days from today, weather). Dropped
+during brainstorming: per-day focus isn't needed, only month browsing is —
+and `nav.c` has no backward-navigation event at all (`SELECT_SHORT` only
+ever moves focus forward, wrapping), so per-day "retreat before day 1" was
+never actually reachable through the two-button vocabulary as originally
+worded. **This whole day-focus and day-detail design is replaced** by:
 
-If the day falls inside the 4-day forecast, it also shows weather: icon and
-high/low today; **rain probability and wind get a reserved place in the
-layout, left blank**, since those fields (`precip_prob`, `wind_max`) don't
-exist in `WeatherDay` until milestone 5 extends it. This lets milestone 5
-fill them in without touching this overlay's layout again.
+Cal+Clock gains exactly two focusables: the `<` and `>` month arrows
+(`nav_focus_count(NAV_SCREEN_CALCLOCK) = 2`, index 0 = previous, index 1 =
+next — up from 0 today). Select cycles focus between them, exactly as
+`nav.c` already does for Main's five. OK on a focused arrow shifts the
+*displayed* month in that direction and redraws the grid.
 
-Live current conditions (Open-Meteo `current_weather`) do **not** belong
-here — see "weather station" screen in Context, above.
+`nav.c` still has no notion of "perform an action, don't open a view" — OK
+on a focused element unconditionally enters `NAV_DETAIL`. Cal+Clock uses the
+same escape hatch `NAV_SETTINGS` already relies on ("caller acts on the row,
+then redraws"): `clock_task.c` recognizes `mode == NAV_DETAIL && screen ==
+NAV_SCREEN_CALCLOCK`, performs the month shift, and immediately sets
+`s_nav.mode` back to `NAV_FOCUS` in the same handler — the user never sees a
+detail view, an OK press on `<`/`>` just feels like it directly changes the
+month, and repeated presses browse further. No `nav.c` change.
+
+**Displayed vs. real "today."** A new pair of statics,
+`s_cal_disp_year`/`s_cal_disp_month`, tracks which month is on screen,
+independent of the RTC's real date. It resets to the real current month
+every time Cal+Clock is loaded (leaving it, then coming back later, always
+starts back at the current month rather than wherever browsing left off —
+predictable over clever). The "today" highlight is shown only when the
+displayed month equals the real current month; otherwise it's hidden. A
+real-world midnight rollover while the display is on a browsed-away month
+does not snap the view back — only the highlight's visibility, computed
+fresh each redraw, reacts to it.
+
+There is no day-detail overlay in this milestone. If per-day detail is
+wanted later, it needs its own design — including how to reach a specific
+day without a backward nav event — not assumed here.
 
 ## Roadmap note
 
@@ -230,11 +257,12 @@ Suggested step order for the implementation plan:
 3. **Dial and second hand** — geometry above, verify on hardware (the second
    hand not going invisible, in particular, is the whole point of this
    milestone per the parent spec).
-4. **Grid, month browsing, leading/trailing day styling.**
-5. **Header rail, bezel, and month buttons** — only once step 2 has
-   confirmed the technique holds up.
-6. **Day detail overlay**, with the rain/wind fields left blank.
-7. **Geometry test coverage** — assert against real font metrics as the
+4. **Grid, month browsing (plain `<`/`>` hit-boxes, no styling yet),
+   leading/trailing day styling.**
+5. **Header rail, bezel, and the `<`/`>` buttons' final dithered/bevelled
+   look** — only once step 2 has confirmed the technique holds up; the
+   arrows' focus/action logic from step 4 is untouched, only their paint.
+6. **Geometry test coverage** — assert against real font metrics as the
    parent spec's testing section describes, not eyeballed.
 
 ## Testing
