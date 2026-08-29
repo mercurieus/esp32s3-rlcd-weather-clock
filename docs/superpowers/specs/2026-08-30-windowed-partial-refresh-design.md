@@ -133,7 +133,14 @@ uint8_t rs = x1 >> 1;       // round down
 uint8_t re = x2 >> 1;       // x2 inclusive, integer division already floors correctly
 ```
 
-**Y (CASET, 12px granularity, Y-inverted):**
+**Y (CASET, 12px granularity, Y-inverted, and CASET *decreases* as screen-Y
+increases):**
+
+CASET's low end (18-20) hardware-measured at the *top* of the screen, its
+high end (40-42) at the *bottom*. Since `block_y` (via `inv_y = height-1-y`)
+is *largest* at the top and smallest at the bottom, CASET must be a
+*decreasing* function of `block_y`: `caset = 42 - block_y/3` (verified against
+both the full-panel case and a top-band example by hand below).
 
 ```cpp
 int inv_y1 = height_ - 1 - y1;
@@ -142,29 +149,49 @@ int by_a = inv_y1 >> 2;
 int by_b = inv_y2 >> 2;
 int by_lo = std::min(by_a, by_b);
 int by_hi = std::max(by_a, by_b);
-by_lo -= by_lo % 3;                       // round down to multiple of 3
-by_hi += (2 - (by_hi % 3));               // round up to next multiple-of-3, minus 1
-uint8_t caset_xs = 18 + by_lo / 3;
-uint8_t caset_xe = 18 + by_hi / 3;
+int g_lo = by_lo / 3;    // group index, ascending with block_y
+int g_hi = by_hi / 3;
+uint8_t caset_xs = 42 - g_hi;    // larger block_y group -> smaller CASET
+uint8_t caset_xe = 42 - g_lo;    // smaller block_y group -> larger CASET
 ```
 
-This always **expands** a rect to its enclosing 12px-aligned band - it can grow
-by up to 11px vertically, never shrinks, so it never under-scans real dirty
-pixels. `RlcdWindow.len = (caset_xe - caset_xs + 1) * (re - rs + 1) * 3`.
+Integer division on `g_lo`/`g_hi` already expands the window to its enclosing
+12px-aligned band (a group is 3 raw `block_y` units): it can grow by up to
+11px vertically, never shrinks, so it never under-scans real dirty pixels.
+`RlcdWindow.len = (caset_xe - caset_xs + 1) * (re - rs + 1) * 3`.
+
+Verified by hand: full panel (`y1=0,y2=299`) gives `by_lo=0,by_hi=74`,
+`g_lo=0,g_hi=24`, `caset_xs=42-24=18`, `caset_xe=42-0=42` - matches the
+existing hardcoded full-panel range exactly. A top-band rect (`y1=0,y2=33`,
+the top ~34 rows) gives `by_a=74,by_b=66`, `g_lo=22,g_hi=24`,
+`caset_xs=42-24=18`, `caset_xe=42-22=20` - correctly the *low* CASET end,
+matching the hardware-confirmed "low CASET = top" direction.
 
 ### Buffer extraction
+
+`DispBuffer`'s own `block_y` index always runs 0-74 ascending regardless of
+what CASET means visually, so the extraction has to convert back from CASET
+to that raw ascending index - using `caset_xe` (the *larger* CASET value) to
+find the *start* of the contiguous run, since larger CASET corresponds to
+*smaller* `block_y`/group index:
 
 ```cpp
 int H4 = height_ >> 2;   // 75, already the stride InitLandscapeLUT() uses
 uint8_t *payload = ...;  // len bytes, heap_caps_malloc(MALLOC_CAP_SPIRAM)
 int cursor = 0;
+int by_start = (42 - caset_xe) * 3;             // = g_lo * 3
+int run_len  = (caset_xe - caset_xs + 1) * 3;
 for (int bx = rs; bx <= re; bx++) {
-    int by_start = (caset_xs - 18) * 3;
-    int run_len  = (caset_xe - caset_xs + 1) * 3;
     memcpy(payload + cursor, &DispBuffer[bx * H4 + by_start], run_len);
     cursor += run_len;
 }
 ```
+
+Verified by hand against the same two cases: full panel gives
+`by_start=(42-42)*3=0`, `run_len=(42-18+1)*3=75` - the entire per-`byte_x`
+span, correct. The top-band rect gives `by_start=(42-20)*3=66`,
+`run_len=(20-18+1)*3=9` - `block_y` 66-74, the topmost 9-row-group span,
+correct.
 
 One `memcpy` per `byte_x` column in range - `(re - rs + 1)` copies, each of a
 contiguous run already sitting in `DispBuffer`.
