@@ -36,6 +36,14 @@ height_(height)
 
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)spihost, &io_config, &io_handle));
 
+    xfer_done_ = xSemaphoreCreateBinary();
+    assert(xfer_done_);
+    xSemaphoreGive(xfer_done_);   /* nothing in flight yet */
+
+    esp_lcd_panel_io_callbacks_t cbs = {};
+    cbs.on_color_trans_done = &DisplayPort::on_color_trans_done;
+    ESP_ERROR_CHECK(esp_lcd_panel_io_register_event_callbacks(io_handle, &cbs, this));
+
     gpio_config_t gpio_conf = {};
     gpio_conf.intr_type     = GPIO_INTR_DISABLE;
     gpio_conf.mode          = GPIO_MODE_OUTPUT;
@@ -229,6 +237,21 @@ void DisplayPort::RLCD_SendData(uint8_t Data) {
 
 void DisplayPort::RLCD_Sendbuffera(uint8_t *Data, int len) {
     ESP_ERROR_CHECK(esp_lcd_panel_io_tx_color(io_handle, -1, Data, len));
+}
+
+bool DisplayPort::on_color_trans_done(esp_lcd_panel_io_handle_t panel_io,
+                                      esp_lcd_panel_io_event_data_t *edata,
+                                      void *user_ctx)
+{
+    DisplayPort *self = static_cast<DisplayPort *>(user_ctx);
+    BaseType_t high_task_awoken = pdFALSE;
+    xSemaphoreGiveFromISR(self->xfer_done_, &high_task_awoken);
+    return high_task_awoken == pdTRUE;
+}
+
+void DisplayPort::RLCD_WaitTransferDone()
+{
+    xSemaphoreTake(xfer_done_, portMAX_DELAY);
 }
 
 void DisplayPort::Set_ResetIOLevel(uint8_t level) {
