@@ -1730,7 +1730,7 @@ lv_timer_handler only runs inside Lvgl_Refresh."
 - Consumes: `Buttons_*` (Task 4), `nav_*` (Task 5), `Overlay_*` (Tasks 6 and 7).
 - Produces: nothing further.
 
-- [ ] **Step 1: Add the dependencies and includes**
+- [x] **Step 1: Add the dependencies and includes**
 
 In `firmware/components/clock/CMakeLists.txt`, add `input` to `PRIV_REQUIRES`.
 
@@ -1745,7 +1745,14 @@ In `firmware/components/clock/clock_task.c`, add:
 
 (`esp_timer.h` is already included; do not add it twice.)
 
-- [ ] **Step 2: Add the navigation state and its helpers**
+- [x] **Step 2: Add the navigation state and its helpers**
+
+Implemented with one deliberate deviation from the plan text: `hint_for_mode()`
+returns a `{key, boot}` struct instead of one combined sentence, and the
+wording follows the sibling project's short-verb-plus-parenthesized-hold
+convention rather than the `"Select: ... OK: ... hold ...:"` phrasing drafted
+here - the drafted phrasing turned out confusing on the actual hardware.
+See `firmware/components/ui/overlay.c` for the badge rendering this drives.
 
 Add near the other file statics, replacing `s_on_calendar_screen`:
 
@@ -1828,7 +1835,18 @@ is already loaded. Add as the last line inside its `Lvgl_lock` block:
         s_loaded_screen = 0xFF;
 ```
 
-- [ ] **Step 3: Replace button handling in the main loop**
+- [x] **Step 3: Replace button handling in the main loop**
+
+Deviates from the plan text in one respect found during hardware
+verification: `button_pressed` no longer gates on
+`esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO` (that only reflects a
+press still held at the next sleep entry, and silently dropped any press that
+started and ended while the task was awake - e.g. during the once-a-second
+colon-blink redraw). It now reads `Buttons_PressPending()`, backed by a real
+GPIO interrupt in `buttons.c`. `Buttons_ReadEvent()` is also now called
+unconditionally whenever a press is pending, even while the battery warning
+owns the screen - it is what re-enables that pin's interrupt, so skipping it
+there was a second way to permanently wedge a button.
 
 Delete `configure_key_button_wakeup()` entirely and its call site. In its place, before the `for (;;)` loop, add:
 
@@ -1873,7 +1891,7 @@ Replace the whole `if (button_pressed && !s_battery_warning_active) { ... }` blo
         }
 ```
 
-- [ ] **Step 4: Replace the screen test and add hint expiry to the tick**
+- [x] **Step 4: Replace the screen test and add hint expiry to the tick**
 
 Replace every remaining `s_on_calendar_screen` test with `s_nav.screen == NAV_SCREEN_CALCLOCK`. In the per-second dirty block, that is the `else if (s_on_calendar_screen)` branch.
 
@@ -1902,7 +1920,7 @@ with:
                         apply_nav_visuals();
 ```
 
-- [ ] **Step 5: Build and verify the whole loop on hardware**
+- [x] **Step 5: Build and verify the whole loop on hardware**
 
 Run: `& $py "$env:IDF_PATH\tools\idf.py" build`
 Expected: builds clean. Any remaining `s_on_calendar_screen` reference is a missed edit.
@@ -1911,35 +1929,62 @@ Run: `& $py "$env:IDF_PATH\tools\idf.py" -p COM<N> flash monitor`
 
 Walk through each of these and confirm:
 
-1. At boot the hint overlay appears for about 5 seconds, then disappears on its own.
-2. Short-press **Select**: the screen switches to Cal+Clock. Again: back to Main.
-3. Short-press **OK** on Main: the focus frame appears around the top-left sensor area.
-4. Short-press **Select** repeatedly: the frame steps through the four forecast days, then wraps back to the sensor.
-5. **Hold Select**: the frame disappears and you are back to plain screen mode.
-6. Short-press **OK** twice: the hint changes to the `NAV_DETAIL` text. There is no detail view yet, which is expected.
-7. **Hold OK**: the hint changes to the settings text. Hold Select to escape.
-8. Short-press **OK** on Cal+Clock: nothing happens, because it has no focusables until milestone 4.
-9. Leave it alone for a minute: the top bar still updates and the clock still ticks.
+1. [x] At boot the hint overlay appears for about 5 seconds, then disappears on its own.
+2. [x] Short-press **Select** (Key): the screen switches to Cal+Clock. Again: back to Main.
+3. [x] Short-press **OK** (Boot) on Main: the focus frame appears around the top-left sensor area.
+4. [x] Short-press **Select** repeatedly: the frame steps through the four forecast days, then wraps back to the sensor.
+5. [x] **Hold Select**: the frame disappears and you are back to plain screen mode.
+6. [x] Short-press **OK** twice: the hint changes to the `NAV_DETAIL` text. There is no detail view yet, which is expected.
+7. [x] **Hold OK**: the hint changes to the settings text. Hold Select to escape.
+8. [x] Short-press **OK** on Cal+Clock: nothing happens, because it has no focusables until milestone 4.
+9. [x] Leave it alone for a minute: the top bar still updates and the clock still ticks.
 
-- [ ] **Step 6: Commit**
+Two real bugs turned up during this pass, both fixed in the same commit:
+dropped short presses (input gated on sleep-wakeup cause rather than a real
+interrupt, so a tap entirely inside the once-a-second redraw window vanished
+with no trace - see Step 3 above) and a single-snapshot debounce that could
+land in a contact-bounce trough and discard a genuine press (`buttons.c` now
+samples across the settle window). Also switched LVGL to
+`LV_DISPLAY_RENDER_MODE_PARTIAL` (`lvgl_bsp.cpp`) so a redraw recomposites
+only the dirty rectangle instead of the whole tree each tick.
+
+- [x] **Step 6: Commit**
 
 ```bash
-git add firmware/components/clock/clock_task.c firmware/components/clock/CMakeLists.txt
+git add firmware/components/app_bsp/lvgl_bsp.cpp firmware/components/clock/CMakeLists.txt \
+       firmware/components/clock/clock_task.c firmware/components/input/buttons.c \
+       firmware/components/input/buttons.h firmware/components/port_bsp/display_bsp.cpp \
+       firmware/components/ui/overlay.c firmware/components/ui/overlay.h
 git commit -m "feat: drive screens from the navigation state machine
 
 Select cycles screens, OK enters focus mode, long OK reaches settings.
-Replaces the single-button screen toggle."
+Replaces the single-button screen toggle.
+..."
 ```
+
+Committed as `9977ae5`.
 
 ---
 
 ## Definition of done
 
-- `python tools/verify_nav.py` prints `all invariants hold`.
-- A `CONFIG_CLOCK_SELFTEST=y` build reports `0 failure(s)` over serial.
-- All nine manual checks in Task 8 step 5 pass on hardware.
-- The displayed time is correct local time while the serial log shows UTC.
-- Only one top bar exists in the codebase; `calendar_update_top_bar` is gone.
+- [x] `python tools/verify_nav.py` prints `all invariants hold`.
+- [x] A `CONFIG_CLOCK_SELFTEST=y` build reports `0 failure(s)` over serial
+      (58 checks / 0 fails, confirmed on-device in Task 5; nothing since has
+      touched `clock_time_test.c` or `nav_test.c`).
+- [x] All nine manual checks in Task 8 step 5 pass on hardware.
+- [x] The displayed time is correct local time while the serial log shows UTC
+      (Task 2/3, `6930a7c`).
+- [x] Only one top bar exists in the codebase; `calendar_update_top_bar` is gone
+      (Task 6).
+
+Milestones 1-3 of the design spec are done. Milestones 4-7 (Vista Cal+Clock
+redraw with metallic/dithered elements, weather API extension for sun/moon,
+Settings screen + NVS, custom chimes) are unplanned follow-on work - see the
+spec header for scope. One open note from hardware verification to carry into
+the Settings screen's own plan: with no dedicated screen yet, "you're in
+Settings mode" is signalled only by hint wording, which reads as ambiguous:
+the real screen should carry its own header/label.
 
 ## Follow-on plans
 
