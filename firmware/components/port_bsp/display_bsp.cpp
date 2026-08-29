@@ -188,6 +188,15 @@ void DisplayPort::RLCD_Init() {
     RLCD_SendCommand(0x38);
     RLCD_SendCommand(0x29);
 
+    /* Tried staying in HPM (~25.5Hz) instead of dropping to LPM (1Hz)
+       here, hoping the slow visible "roll" on large-area updates was
+       the FRCTRL/0xB2 frame rate. Hardware-measured: no change - same
+       ~50px/sec roll in both HPM and LPM. That rules out the frame
+       rate register; the roll is the panel's own liquid-crystal optical
+       settling time, not an addressing/clock-rate limit, so there's no
+       reason to pay LPM's power cost for zero visible benefit. Back to
+       LPM. See docs/superpowers/specs/2026-08-29-calclock-vista-redraw-design.md
+       and the SDD ledger for the full investigation. */
     RLCD_SendCommand(0x39);
     vTaskDelay(pdMS_TO_TICKS(100));
 
