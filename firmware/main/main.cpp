@@ -16,6 +16,8 @@ DisplayPort RlcdPort(12, 11, 5, 40, 41, LCD_WIDTH, LCD_HEIGHT);
 
 static void Lvgl_FlushCallback(lv_display_t *drv, const lv_area_t *area, uint8_t *color_map)
 {
+    RlcdPort.RLCD_WaitTransferDone();
+
     uint16_t *buffer = (uint16_t *)color_map;
     for (int y = area->y1; y <= area->y2; y++)
     {

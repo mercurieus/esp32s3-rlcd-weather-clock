@@ -5,6 +5,8 @@
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_vendor.h>
 #include <esp_lcd_panel_ops.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 #define AlgorithmOptimization  3
 
@@ -28,6 +30,10 @@ class DisplayPort {
     int                 height_;
     uint8_t            *DispBuffer = NULL;
     int                 DisplayLen;
+    SemaphoreHandle_t xfer_done_ = NULL;
+    static bool on_color_trans_done(esp_lcd_panel_io_handle_t panel_io,
+                                    esp_lcd_panel_io_event_data_t *edata,
+                                    void *user_ctx);
 #if (AlgorithmOptimization == 3)
     uint16_t (*PixelIndexLUT)[300];
     uint8_t  (*PixelBitLUT  )[300];
@@ -47,6 +53,7 @@ class DisplayPort {
     void RLCD_Init();
     void RLCD_ColorClear(uint8_t color);
     void RLCD_Display();
+    void RLCD_WaitTransferDone();
     #if (AlgorithmOptimization != 3)
     void RLCD_SetPortraitPixel(uint16_t x, uint16_t y, uint8_t color);
     void RLCD_SetLandscapePixel(uint16_t x, uint16_t y, uint8_t color);

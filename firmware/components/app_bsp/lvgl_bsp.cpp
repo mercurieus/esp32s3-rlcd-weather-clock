@@ -33,8 +33,6 @@ void Lvgl_Refresh(void)
     lv_tick_inc(elapsed_ms);
     lv_timer_handler();
     lv_refr_now(NULL);
-
-    vTaskDelay(pdMS_TO_TICKS(50));
 }
 
 void Lvgl_PortInit(int width, int height, DispFlushCb flush_cb)
