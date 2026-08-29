@@ -175,14 +175,25 @@ to that raw ascending index - using `caset_xe` (the *larger* CASET value) to
 find the *start* of the contiguous run, since larger CASET corresponds to
 *smaller* `block_y`/group index:
 
+The payload is written into a **persistent scratch buffer** (`WindowBuffer`,
+allocated once at full `DisplayLen` size, alongside `DispBuffer` in the
+constructor) rather than a fresh `malloc`/`free` per call. `RLCD_Sendbuffera()`
+queues an async DMA send and returns immediately (this is exactly the bug the
+spike's own `RLCD_TestWindow` diagnostic hit: freeing a buffer right after
+queuing it races the still-in-flight transfer). A persistent buffer sidesteps
+this the same way `DispBuffer` itself already is safe: the *next* batch's
+existing `RLCD_WaitTransferDone()` (Task 1, called before that batch's first
+pixel write) guarantees any previous transfer - including one reading from
+`WindowBuffer` - has completed before either buffer is touched again. No new
+wait or malloc/free churn needed inside the windowed send itself.
+
 ```cpp
 int H4 = height_ >> 2;   // 75, already the stride InitLandscapeLUT() uses
-uint8_t *payload = ...;  // len bytes, heap_caps_malloc(MALLOC_CAP_SPIRAM)
 int cursor = 0;
 int by_start = (42 - caset_xe) * 3;             // = g_lo * 3
 int run_len  = (caset_xe - caset_xs + 1) * 3;
 for (int bx = rs; bx <= re; bx++) {
-    memcpy(payload + cursor, &DispBuffer[bx * H4 + by_start], run_len);
+    memcpy(WindowBuffer + cursor, &DispBuffer[bx * H4 + by_start], run_len);
     cursor += run_len;
 }
 ```
@@ -247,8 +258,10 @@ same "exactly one send per batch" shape Task 1 already established.
   payload-extraction loop read from the same `RlcdWindow` value, eliminating
   the class of bug the spike hit (an under-sized payload computed separately
   from the addressed window).
-- `RLCD_DisplayWindow()` follows the same async-send discipline as
-  `RLCD_Display()` and the spike's diagnostic code: the caller
+- `RLCD_DisplayWindow()` writes into the persistent `WindowBuffer` (not a
+  fresh per-call allocation - see Buffer extraction above), so it needs no
+  internal wait of its own: it follows the same async-send discipline as
+  `RLCD_Display()` already does with `DispBuffer`. The caller
   (`RLCD_DisplayAuto`, itself called from the batch's last flush) relies on
   `Lvgl_FlushCallback`'s existing `RLCD_WaitTransferDone()`/`RLCD_Display()`
   pairing - no new semaphore logic needed, since there is still exactly one
