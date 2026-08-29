@@ -40,4 +40,8 @@ void DisplayBsp_RunTests(void)
     check_window(400, 300, 2, 0, 5, 299, 18, 42, 1, 2, 150);
 }
 
+#else
+
+void DisplayBsp_RunTests(void) {}
+
 #endif
