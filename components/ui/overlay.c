@@ -130,8 +130,9 @@ void Overlay_Create(void)
         for (int gy = 0; gy < 30; gy++) {
             canvas_dither_fill(band, 0, gy, 0, gy, 400, 1, rail_grey(gy));
         }
+        /* No hard white ridge line - it cut straight through the reading
+           glyphs. rail_grey's gradient already peaks bright around y11. */
         for (int x = 0; x < 400; x++) {
-            lv_canvas_set_px(band, x, 10, lv_color_hex(0xffffff), LV_OPA_COVER);   /* bright ridge */
             lv_canvas_set_px(band, x, 29, lv_color_hex(0x000000), LV_OPA_COVER);   /* dark lower lip */
             lv_canvas_set_px(band, x, 30, lv_color_hex(0x000000), LV_OPA_COVER);
         }
@@ -143,16 +144,19 @@ void Overlay_Create(void)
        plaques. rail_grey keeps the text band a light, sparse stipple so
        20pt black text stays legible on it. Label x positions leave room
        for each reading's widest value at montserrat_20 ("-88.8" / "100%" /
-       "01.01.2000" / "4.20"). */
-    s_temp    = overlay_label(top, 3, 5, 0, LV_TEXT_ALIGN_LEFT, "0.0");
-    s_hum     = overlay_label(top, 67, 5, 0, LV_TEXT_ALIGN_LEFT, "0%");
-    s_date    = overlay_label(top, 135, 5, 0, LV_TEXT_ALIGN_LEFT, "01.01.2000");
+       "01.01.2000" / "4.20"). All four share one y so they read as a
+       single row, sitting high enough to clear the dark lip at y29/30. */
+    #define RAIL_TEXT_Y 3
+    s_temp    = overlay_label(top, 3,   RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "0.0");
+    s_hum     = overlay_label(top, 67,  RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "0%");
+    s_date    = overlay_label(top, 135, RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "01.01.2000");
 
-    /* Battery: a hollow outlined box (default transparent bg), consistent
-       with the other readings sitting straight on the rail. */
-    overlay_frame(top, 330, 3, 58, 26);        /* battery body - hollow outline */
-    overlay_frame(top, 388, 8, 6, 15);         /* nub */
-    s_battery = overlay_label(top, 333, 5, 52, LV_TEXT_ALIGN_CENTER, "0.00");
+    /* Battery: a hollow outlined box (default transparent bg), vertically
+       centred on the battery label's line box so its number reads level
+       with the other three. */
+    overlay_frame(top, 330, 1, 58, 27);        /* battery body - hollow outline */
+    overlay_frame(top, 388, 6, 6, 17);         /* nub */
+    s_battery = overlay_label(top, 333, RAIL_TEXT_Y, 52, LV_TEXT_ALIGN_CENTER, "0.00");
 
     /* Focus frame. 3 px so it survives the 1 bit threshold, and hidden
        until a focusable element is selected. */
