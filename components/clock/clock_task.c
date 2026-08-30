@@ -240,6 +240,18 @@ static hint_text_t hint_for_mode(const nav_state_t *st)
     return (hint_text_t){ "", "" };
 }
 
+/* Displayed-month state is normally seeded by apply_nav_visuals() on screen
+   entry; that path is skipped if the RTC read there fails. Seed from a
+   known-good `now` at the point of use so a transient RTC hiccup on entry
+   can never render MONTHS[-1]. */
+static void calclock_ensure_disp_month(const struct tm *now)
+{
+    if (s_cal_disp_month < 0) {
+        s_cal_disp_year  = now->tm_year + 1900;
+        s_cal_disp_month = now->tm_mon;
+    }
+}
+
 /* Absolute screen rectangles for Main's focusable elements. Index 0 is the
    indoor sensor in the shared top bar; 1..4 are the forecast days. */
 static void main_focus_area(uint8_t index, lv_area_t *out)
@@ -424,6 +436,7 @@ static void clock_task(void *arg)
                             apply_nav_visuals();
                             if (s_nav.mode == NAV_SCREEN &&
                                 s_nav.screen == NAV_SCREEN_CALCLOCK) {
+                                calclock_ensure_disp_month(&now);
                                 update_calendar_display(s_cal_disp_year, s_cal_disp_month, &now);
                                 update_clock_hands(now.tm_hour, now.tm_min, now.tm_sec);
                                 s_last_cal_day = now.tm_mday;
@@ -491,6 +504,7 @@ static void clock_task(void *arg)
                 /* the notice is static - nothing to redraw */
             } else if (s_nav.screen == NAV_SCREEN_CALCLOCK) {
                 if (now.tm_mday != s_last_cal_day || now.tm_mon != s_last_cal_mon) {
+                    calclock_ensure_disp_month(&now);
                     update_calendar_display(s_cal_disp_year, s_cal_disp_month, &now);
                     s_last_cal_day = now.tm_mday;
                     s_last_cal_mon = now.tm_mon;
