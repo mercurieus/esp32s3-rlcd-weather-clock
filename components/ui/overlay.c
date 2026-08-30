@@ -1,6 +1,9 @@
 #include "overlay.h"
 
+#include "esp_heap_caps.h"
+
 #include "fonts.h"
+#include "dither.h"
 
 static lv_obj_t *s_temp;
 static lv_obj_t *s_hum;
@@ -12,6 +15,26 @@ static lv_obj_t *s_hint_key_label;
 static lv_obj_t *s_hint_boot_label;
 static uint32_t  s_hint_until_ms;
 static bool      s_hint_visible;
+
+#define RAIL_BUF_SIZE LV_CANVAS_BUF_SIZE(400, 34, 16, LV_DRAW_BUF_STRIDE_ALIGN)
+static uint8_t *s_rail_buf = NULL;
+
+/* Fills a canvas rectangle with a dithered mid-grey band - the "metal"
+   look. grey is 0..255, same convention as Dither_Threshold. canvas_x/y
+   are the fill's position within the canvas, screen_x/y its absolute
+   screen position (dithering is computed in screen space so adjacent
+   dithered elements tile consistently against each other). */
+static void canvas_dither_fill(lv_obj_t *canvas, int canvas_x, int canvas_y,
+                               int screen_x, int screen_y, int w, int h, uint8_t grey)
+{
+    for (int py = 0; py < h; py++) {
+        for (int px = 0; px < w; px++) {
+            lv_color_t c = Dither_Threshold(screen_x + px, screen_y + py, grey)
+                ? lv_color_hex(0x000000) : lv_color_hex(0xffffff);
+            lv_canvas_set_px(canvas, canvas_x + px, canvas_y + py, c, LV_OPA_COVER);
+        }
+    }
+}
 
 /* A solid 2 px block, not an lv_line: hairlines dither away on a 1 bit
    panel. */
@@ -41,6 +64,25 @@ static lv_obj_t *overlay_frame(lv_obj_t *parent, int x, int y, int w, int h)
     lv_obj_set_style_border_opa(o, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(o, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
     return o;
+}
+
+/* A recessed white plaque: keeps text off the dithered rail (the hard
+   rule - dithering behind text destroys glyphs at this panel's pitch),
+   shaded to read as sunken via a dark top-left edge, light bottom-right. */
+static void overlay_plaque(lv_obj_t *parent, int x, int y, int w, int h)
+{
+    lv_obj_t *o = lv_obj_create(parent);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_pos(o, x, y);
+    lv_obj_set_size(o, w, h);
+    lv_obj_set_style_pad_all(o, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(o, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(o, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(o, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(o, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_side(o, LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(o, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
 }
 
 static lv_obj_t *overlay_label(lv_obj_t *parent, int x, int y, int width,
@@ -93,23 +135,41 @@ void Overlay_Create(void)
     lv_obj_set_style_border_width(top, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_remove_flag(top, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* An opaque white band so screen content cannot show through the bar. */
-    lv_obj_t *band = lv_obj_create(top);
-    lv_obj_remove_flag(band, LV_OBJ_FLAG_SCROLLABLE);
+    /* A rolled metal rail: dithered mid-grey band, a bright ridge about a
+       third of the way down and a dark lower lip - not a flat white bar.
+       Drawn on a canvas because a per-object dither would blow the LVGL
+       heap budget. Still fully opaque so screen content cannot show
+       through the bar. */
+    s_rail_buf = (uint8_t *)heap_caps_malloc(RAIL_BUF_SIZE, MALLOC_CAP_SPIRAM);
+    lv_obj_t *band = lv_canvas_create(top);
+    if (s_rail_buf) {
+        lv_canvas_set_buffer(band, s_rail_buf, 400, 34, LV_COLOR_FORMAT_RGB565);
+        lv_canvas_fill_bg(band, lv_color_hex(0xffffff), LV_OPA_COVER);
+
+        canvas_dither_fill(band, 0, 0, 0, 0, 400, 30, 160);
+        for (int x = 0; x < 400; x++) {
+            lv_canvas_set_px(band, x, 10, lv_color_hex(0xffffff), LV_OPA_COVER);   /* bright ridge */
+            lv_canvas_set_px(band, x, 29, lv_color_hex(0x000000), LV_OPA_COVER);   /* dark lower lip */
+            lv_canvas_set_px(band, x, 30, lv_color_hex(0x000000), LV_OPA_COVER);
+        }
+    }
     lv_obj_set_pos(band, 0, 0);
     lv_obj_set_size(band, 400, 34);
-    lv_obj_set_style_pad_all(band, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_radius(band, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_width(band, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(band, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(band, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    /* Battery plaque first, so the battery outline frames draw on top of it. */
+    overlay_plaque(top, 330, 1, 62, 22);
     overlay_frame(top, 329, 5, 64, 26);   /* battery body */
     overlay_frame(top, 391, 10, 7, 16);   /* battery nub  */
 
+    overlay_plaque(top, 0, 1, 84, 22);
     s_temp    = overlay_label(top, 2, 3, 0, LV_TEXT_ALIGN_LEFT, "0.0");
+
+    overlay_plaque(top, 87, 1, 60, 22);
     s_hum     = overlay_label(top, 89, 3, 0, LV_TEXT_ALIGN_LEFT, "0%");
+
+    overlay_plaque(top, 161, 1, 100, 22);
     s_date    = overlay_label(top, 163, 3, 0, LV_TEXT_ALIGN_LEFT, "01.01.2000");
+
     s_battery = overlay_label(top, 332, 3, 58, LV_TEXT_ALIGN_CENTER, "0.00");
 
     overlay_rule(top, 0, 34, 400);

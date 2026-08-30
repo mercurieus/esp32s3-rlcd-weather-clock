@@ -384,6 +384,32 @@ static void draw_minor_dots(lv_obj_t *canvas)
     }
 }
 
+/* The dithered dial bezel: a ring just outside CLOCK_RADIUS. Redrawn every
+   update_clock_hands call (it is only ~2000 set_px, trivial next to the
+   per-second full-panel SPI send) because update_clock_hands full-clears
+   the canvas each time. Screen-space coords feed Dither_Threshold so the
+   ring tiles with the header rail.
+
+   The ring's outer radius (CLOCK_RADIUS + 10 = 78) exceeds the 75 px
+   half-canvas, so the ring's four cardinal extremes fall outside the
+   150 px canvas and are clipped - the ring is slightly cropped at top,
+   bottom, left and right (accepted; note for hardware). Every set_px is
+   guarded against the canvas bounds regardless. */
+static void draw_clock_bezel(lv_obj_t *canvas)
+{
+    for (int y = 0; y < CLOCK_SIZE; y++) {
+        for (int x = 0; x < CLOCK_SIZE; x++) {
+            if (x < 0 || y < 0 || x >= CLOCK_SIZE || y >= CLOCK_SIZE) continue;
+            double dx = x - CLOCK_CENTER, dy = y - CLOCK_CENTER;
+            double r = sqrt(dx * dx + dy * dy);
+            if (r < CLOCK_RADIUS + 2 || r > CLOCK_RADIUS + 10) continue;
+            if (Dither_Threshold(CAL_CLOCK_X + x, CAL_CLOCK_Y + y, 150)) {
+                lv_canvas_set_px(canvas, x, y, lv_color_hex(0x000000), LV_OPA_COVER);
+            }
+        }
+    }
+}
+
 void update_clock_hands(int hour, int minute, int second)
 {
     lv_obj_t *canvas = objects.clock_canvas;
@@ -392,6 +418,8 @@ void update_clock_hands(int hour, int minute, int second)
     lv_canvas_fill_bg(canvas, lv_color_hex(0xFFFFFF), LV_OPA_COVER);
 
     draw_minor_dots(canvas);
+
+    draw_clock_bezel(canvas);
 
     lv_layer_t layer;
     lv_canvas_init_layer(canvas, &layer);
@@ -547,6 +575,41 @@ static lv_obj_t *cal_add_label(lv_obj_t *parent, int x, int y, const lv_font_t *
     return l;
 }
 
+/* A round month-browse button, shaded as a hemisphere bulging toward the
+   viewer, lit from the upper-left, then thresholded through the Bayer
+   matrix in screen space so it tiles with the rail. The glyph rides on a
+   centred label child so the dither never sits behind text. Clears its
+   whole canvas first - pixels outside the circle would otherwise stay
+   uninitialised RGB565. */
+static void draw_arrow_button(lv_obj_t *canvas, int screen_x, int screen_y, int size, const char *glyph)
+{
+    lv_canvas_fill_bg(canvas, lv_color_hex(0xffffff), LV_OPA_COVER);
+
+    const int r = size / 2;
+    const double lx = -0.5, ly = -0.5, lz = 0.7;   /* light from upper-left */
+    const double llen = sqrt(lx * lx + ly * ly + lz * lz);
+
+    for (int y = 0; y < size; y++) {
+        for (int x = 0; x < size; x++) {
+            double dx = (x - r) / (double)r, dy = (y - r) / (double)r;
+            double d2 = dx * dx + dy * dy;
+            if (d2 > 1.0) continue;   /* outside the circle */
+            double dz = sqrt(1.0 - d2);   /* hemisphere bulging toward the viewer */
+            double dot = (dx * lx + dy * ly + dz * lz) / llen;
+            uint8_t grey = (uint8_t)((dot * 0.5 + 0.5) * 255.0);
+            lv_color_t c = Dither_Threshold(screen_x + x, screen_y + y, grey)
+                ? lv_color_hex(0x000000) : lv_color_hex(0xffffff);
+            lv_canvas_set_px(canvas, x, y, c, LV_OPA_COVER);
+        }
+    }
+
+    lv_obj_t *l = lv_label_create(canvas);
+    lv_obj_center(l);
+    lv_obj_set_style_text_font(l, &lv_font_montserrat_16, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(l, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_label_set_text_static(l, glyph);
+}
+
 static void create_calendar_forecast_row(lv_obj_t *parent)
 {
     for (int i = 0; i < 4; i++) {
@@ -579,12 +642,21 @@ void create_screen_calendar() {
     lv_obj_set_style_bg_color(obj, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_all(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    s_cal_arrow_prev = cal_add_label(obj, CAL_COL_X0, CAL_TITLE_Y, &lv_font_montserrat_16,
-                                     CAL_ARROW_W, LV_TEXT_ALIGN_CENTER, "<");
+    static uint8_t s_arrow_prev_buf[LV_CANVAS_BUF_SIZE(CAL_ARROW_W, CAL_ARROW_W, 16, LV_DRAW_BUF_STRIDE_ALIGN)];
+    static uint8_t s_arrow_next_buf[LV_CANVAS_BUF_SIZE(CAL_ARROW_W, CAL_ARROW_W, 16, LV_DRAW_BUF_STRIDE_ALIGN)];
+
+    s_cal_arrow_prev = lv_canvas_create(obj);
+    lv_canvas_set_buffer(s_cal_arrow_prev, s_arrow_prev_buf, CAL_ARROW_W, CAL_ARROW_W, LV_COLOR_FORMAT_RGB565);
+    lv_obj_set_pos(s_cal_arrow_prev, CAL_COL_X0, CAL_TITLE_Y);
+    draw_arrow_button(s_cal_arrow_prev, CAL_COL_X0, CAL_TITLE_Y, CAL_ARROW_W, "<");
+
     objects.cal_title = cal_add_label(obj, CAL_COL_X0 + CAL_ARROW_W, CAL_TITLE_Y, &lv_font_montserrat_16,
                                       CAL_GRID_W - 2 * CAL_ARROW_W, LV_TEXT_ALIGN_CENTER, "Calendar");
-    s_cal_arrow_next = cal_add_label(obj, CAL_COL_X0 + CAL_GRID_W - CAL_ARROW_W, CAL_TITLE_Y, &lv_font_montserrat_16,
-                                     CAL_ARROW_W, LV_TEXT_ALIGN_CENTER, ">");
+
+    s_cal_arrow_next = lv_canvas_create(obj);
+    lv_canvas_set_buffer(s_cal_arrow_next, s_arrow_next_buf, CAL_ARROW_W, CAL_ARROW_W, LV_COLOR_FORMAT_RGB565);
+    lv_obj_set_pos(s_cal_arrow_next, CAL_COL_X0 + CAL_GRID_W - CAL_ARROW_W, CAL_TITLE_Y);
+    draw_arrow_button(s_cal_arrow_next, CAL_COL_X0 + CAL_GRID_W - CAL_ARROW_W, CAL_TITLE_Y, CAL_ARROW_W, ">");
 
     /* One label per weekday column for the header row; header text never
        mixes fonts, so it stays a single-line centred label per column. */
