@@ -304,15 +304,15 @@ void create_screen_main() {
 void tick_screen_main() {
 }
 
-#define CLOCK_SIZE 156
-#define CLOCK_CENTER 78
-#define CLOCK_RADIUS 68
+#define CLOCK_SIZE 166
+#define CLOCK_CENTER 83
+#define CLOCK_RADIUS 73
 
-/* Dial's screen position on the Cal+Clock screen (x 238..394, y 46..202). */
-#define CAL_CLOCK_X       238
-#define CAL_CLOCK_Y       46
+/* Dial's screen position on the Cal+Clock screen (x 222..388, y 38..204). */
+#define CAL_CLOCK_X       222
+#define CAL_CLOCK_Y       38
 
-#define MINOR_DOT_RADIUS 64     /* near the rim, "closer to the end of the dial" */
+#define MINOR_DOT_RADIUS (CLOCK_RADIUS - 4)  /* near the rim, scales with the face */
 #define MINOR_DOT_SIZE   3      /* 3x3 px block - axis-aligned, no diagonal speckle */
 #define MINOR_DOT_GREY   128    /* dithered mid-grey: lighter than the solid hour ticks */
 
@@ -323,10 +323,6 @@ void tick_screen_main() {
 #define CLOCK_BUF_SIZE LV_CANVAS_BUF_SIZE(CLOCK_SIZE, CLOCK_SIZE, 16, LV_DRAW_BUF_STRIDE_ALIGN)
 
 static uint8_t *clock_buf = NULL;
-
-/* HH:MM readout on the analog face - a canvas child, created in
-   create_screen_calendar, fed by update_clock_hands. */
-static lv_obj_t *s_clock_digital;
 
 static void draw_clock_face(lv_layer_t *layer)
 {
@@ -394,8 +390,8 @@ static void draw_minor_dots(lv_obj_t *canvas)
    the canvas each time. Screen-space coords feed Dither_Threshold so the
    ring tiles with the header rail.
 
-   The ring band is r 70..76 (CLOCK_RADIUS+2 .. CLOCK_RADIUS+8), whose
-   outer edge (76) stays inside the 78 px half-canvas (156 px canvas), so
+   The ring band is r 75..81 (CLOCK_RADIUS+2 .. CLOCK_RADIUS+8), whose
+   outer edge (81) stays inside the 83 px half-canvas (166 px canvas), so
    the ring renders complete - no clipping at the four cardinal points.
 
    The ring carries a radial grey gradient (bright in the middle of its
@@ -425,10 +421,6 @@ void update_clock_hands(int hour, int minute, int second)
     lv_obj_t *canvas = objects.clock_canvas;
     if (!canvas) return;
 
-    if (s_clock_digital) {
-        lv_label_set_text_fmt(s_clock_digital, "%02d:%02d", hour, minute);
-    }
-
     lv_canvas_fill_bg(canvas, lv_color_hex(0xFFFFFF), LV_OPA_COVER);
 
     draw_minor_dots(canvas);
@@ -440,6 +432,45 @@ void update_clock_hands(int hour, int minute, int second)
 
     draw_clock_face(&layer);
 
+    /* Digital HH:MM window on the lower face - drawn into the layer BEFORE
+       the hands, so they sweep over it. Recessed look: white fill, thin
+       black frame, and a dark inner top-left edge for the "sunk in" shadow. */
+    char hhmm[6];
+    lv_snprintf(hhmm, sizeof(hhmm), "%02d:%02d", hour, minute);
+
+    lv_area_t win = {
+        CLOCK_CENTER - 25, CLOCK_CENTER + 20,
+        CLOCK_CENTER + 25, CLOCK_CENTER + 42,
+    };
+    lv_draw_rect_dsc_t win_dsc;
+    lv_draw_rect_dsc_init(&win_dsc);
+    win_dsc.bg_color = lv_color_hex(0xffffff);
+    win_dsc.bg_opa = LV_OPA_COVER;
+    win_dsc.border_color = lv_color_hex(0x000000);
+    win_dsc.border_opa = LV_OPA_COVER;
+    win_dsc.border_width = 1;
+    lv_draw_rect(&layer, &win_dsc, &win);
+
+    /* inner shadow: a 1px black line inset 2px along the top and left only */
+    lv_draw_rect_dsc_t win_sh;
+    lv_draw_rect_dsc_init(&win_sh);
+    win_sh.bg_opa = LV_OPA_TRANSP;
+    win_sh.border_color = lv_color_hex(0x000000);
+    win_sh.border_opa = LV_OPA_COVER;
+    win_sh.border_width = 1;
+    win_sh.border_side = LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_LEFT;
+    lv_area_t win_inner = { win.x1 + 2, win.y1 + 2, win.x2 - 2, win.y2 - 2 };
+    lv_draw_rect(&layer, &win_sh, &win_inner);
+
+    lv_draw_label_dsc_t hhmm_dsc;
+    lv_draw_label_dsc_init(&hhmm_dsc);
+    hhmm_dsc.text = hhmm;
+    hhmm_dsc.color = lv_color_hex(0x000000);
+    hhmm_dsc.font = &lv_font_montserrat_14;
+    hhmm_dsc.align = LV_TEXT_ALIGN_CENTER;
+    lv_area_t hhmm_area = { win.x1, win.y1 + 4, win.x2, win.y2 };
+    lv_draw_label(&layer, &hhmm_dsc, &hhmm_area);
+
     lv_draw_line_dsc_t line_dsc;
     lv_draw_line_dsc_init(&line_dsc);
     line_dsc.color = lv_color_hex(0x000000);
@@ -449,20 +480,20 @@ void update_clock_hands(int hour, int minute, int second)
 
     double h_angle = ((hour % 12) * 30 + minute * 0.5 - 90) * M_PI / 180.0;
     line_dsc.width = 5;
-    line_dsc.p2.x = CLOCK_CENTER + (int)(34 * cos(h_angle));
-    line_dsc.p2.y = CLOCK_CENTER + (int)(34 * sin(h_angle));
+    line_dsc.p2.x = CLOCK_CENTER + (int)(37 * cos(h_angle));
+    line_dsc.p2.y = CLOCK_CENTER + (int)(37 * sin(h_angle));
     lv_draw_line(&layer, &line_dsc);
 
     double m_angle = (minute * 6 - 90) * M_PI / 180.0;
     line_dsc.width = 3;
-    line_dsc.p2.x = CLOCK_CENTER + (int)(52 * cos(m_angle));
-    line_dsc.p2.y = CLOCK_CENTER + (int)(52 * sin(m_angle));
+    line_dsc.p2.x = CLOCK_CENTER + (int)(55 * cos(m_angle));
+    line_dsc.p2.y = CLOCK_CENTER + (int)(55 * sin(m_angle));
     lv_draw_line(&layer, &line_dsc);
 
     double s_angle = (second * 6 - 90) * M_PI / 180.0;
     line_dsc.width = 2;
-    line_dsc.p2.x = CLOCK_CENTER + (int)(58 * cos(s_angle));
-    line_dsc.p2.y = CLOCK_CENTER + (int)(58 * sin(s_angle));
+    line_dsc.p2.x = CLOCK_CENTER + (int)(62 * cos(s_angle));
+    line_dsc.p2.y = CLOCK_CENTER + (int)(62 * sin(s_angle));
     lv_draw_line(&layer, &line_dsc);
 
     lv_draw_rect_dsc_t rect_dsc;
@@ -511,7 +542,7 @@ static const char *QUOTES[] = {
 //   82..202  day grid: a 6x7 array of individual day-cell labels, one per
 //            cell (leading/trailing days render in a smaller font, so they
 //            cannot share a multi-line label with the current month)
-//   46..202  analog clock canvas (right side), digital HH:MM on the face
+//   38..204  analog clock canvas (right side), digital HH:MM on the face
 //   210..244 four day weather row
 //   254..296 quote of the day
 //
@@ -725,19 +756,6 @@ void create_screen_calendar() {
             lv_canvas_set_buffer(canvas, clock_buf, CLOCK_SIZE, CLOCK_SIZE, LV_COLOR_FORMAT_RGB565);
             lv_obj_set_pos(canvas, CAL_CLOCK_X, CAL_CLOCK_Y);
             update_clock_hands(0, 0, 0);
-
-            s_clock_digital = lv_label_create(canvas);
-            lv_obj_set_style_bg_color(s_clock_digital, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_bg_opa(s_clock_digital, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_hor(s_clock_digital, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_pad_ver(s_clock_digital, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_border_color(s_clock_digital, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_border_opa(s_clock_digital, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_border_width(s_clock_digital, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_text_font(s_clock_digital, &lv_font_montserrat_14, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_text_color(s_clock_digital, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_label_set_text(s_clock_digital, "00:00");
-            lv_obj_align(s_clock_digital, LV_ALIGN_CENTER, 0, 28);   /* lower-centre of the face, below the hub */
         }
     }
 
