@@ -473,6 +473,7 @@ static const char *QUOTES[] = {
 #define CAL_TITLE_Y       40
 #define CAL_COL_X0        6
 #define CAL_COL_W         30
+#define CAL_ARROW_W       20
 #define CAL_ROW_H         20    /* montserrat_14 line_height (16) + 4 */
 #define CAL_ROWS          6     /* Monday-first months never need a 7th */
 #define CAL_GRID_Y        62
@@ -489,7 +490,10 @@ static const char *QUOTES[] = {
 
 #define CAL_QUOTE_Y       254
 
-static lv_obj_t *s_cal_cols[7];
+static lv_obj_t *s_cal_cols[7];              /* header row: Mo..Su */
+static lv_obj_t *s_cal_days[CAL_ROWS][7];    /* one label per day cell */
+static lv_obj_t *s_cal_arrow_prev;
+static lv_obj_t *s_cal_arrow_next;
 static lv_obj_t *s_cal_fc_icon[4];
 static lv_obj_t *s_cal_fc_date[4];
 static lv_obj_t *s_cal_fc_temp[4];
@@ -572,27 +576,41 @@ void create_screen_calendar() {
     lv_obj_set_style_bg_color(obj, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_all(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    objects.cal_title = cal_add_label(obj, 8, CAL_TITLE_Y, &lv_font_montserrat_16,
-                                      0, LV_TEXT_ALIGN_LEFT, "Calendar");
+    s_cal_arrow_prev = cal_add_label(obj, CAL_COL_X0, CAL_TITLE_Y, &lv_font_montserrat_16,
+                                     CAL_ARROW_W, LV_TEXT_ALIGN_CENTER, "<");
+    objects.cal_title = cal_add_label(obj, CAL_COL_X0 + CAL_ARROW_W, CAL_TITLE_Y, &lv_font_montserrat_16,
+                                      CAL_GRID_W - 2 * CAL_ARROW_W, LV_TEXT_ALIGN_CENTER, "Calendar");
+    s_cal_arrow_next = cal_add_label(obj, CAL_COL_X0 + CAL_GRID_W - CAL_ARROW_W, CAL_TITLE_Y, &lv_font_montserrat_16,
+                                     CAL_ARROW_W, LV_TEXT_ALIGN_CENTER, ">");
 
-    /* One label per weekday column instead of one space-padded text block:
-       Montserrat is proportional (digit 1 is 5 px, digit 4 is 9 px), so the
-       columns can only line up if each one is its own fixed-width centred
-       label. Line 0 is the weekday header, so the header is always over its
-       own column by construction. */
+    /* One label per weekday column for the header row; header text never
+       mixes fonts, so it stays a single-line centred label per column. */
     static const char *DOW[7] = { "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su" };
     for (int c = 0; c < 7; c++) {
         lv_obj_t *col = lv_label_create(obj);
         s_cal_cols[c] = col;
         lv_obj_set_pos(col, CAL_COL_X0 + c * CAL_COL_W, CAL_GRID_Y);
-        lv_obj_set_size(col, CAL_COL_W, (CAL_ROWS + 1) * CAL_ROW_H);
-        lv_label_set_long_mode(col, LV_LABEL_LONG_CLIP);
+        lv_obj_set_size(col, CAL_COL_W, CAL_ROW_H);
         lv_obj_set_style_text_font(col, &lv_font_montserrat_14, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(col, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_text_align(col, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-        /* labels ignore pad_row - line pitch comes from text_line_space */
-        lv_obj_set_style_text_line_space(col, CAL_ROW_H - 16, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_label_set_text_static(col, DOW[c]);
+    }
+
+    /* One label per day cell, not one multi-line label per column: leading
+       and trailing days (from the adjacent month) render in montserrat_12
+       against the current month's montserrat_14, and a single lv_label
+       cannot mix fonts within itself. */
+    for (int r = 0; r < CAL_ROWS; r++) {
+        for (int c = 0; c < 7; c++) {
+            lv_obj_t *cell = lv_label_create(obj);
+            s_cal_days[r][c] = cell;
+            lv_obj_set_pos(cell, CAL_COL_X0 + c * CAL_COL_W, CAL_GRID_Y + (r + 1) * CAL_ROW_H);
+            lv_obj_set_size(cell, CAL_COL_W, CAL_ROW_H);
+            lv_obj_set_style_text_color(cell, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_text_align(cell, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_label_set_text_static(cell, "");
+        }
     }
 
     cal_add_rule(obj, CAL_COL_X0, CAL_GRID_Y + CAL_ROW_H - 4, CAL_GRID_W);
@@ -650,45 +668,65 @@ void calendar_update_forecast(int idx, const char *date, const lv_image_dsc_t *i
     lv_label_set_text(s_cal_fc_temp[idx], temp);
 }
 
-void update_calendar_display(const struct tm *ti) {
+void update_calendar_display(int disp_year, int disp_month, const struct tm *today)
+{
     static const char *MONTHS[] = { "January","February","March","April","May","June",
                                     "July","August","September","October","November","December" };
-    static const char *DOW[7] = { "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su" };
 
     if (!objects.calendar) return;
 
-    lv_label_set_text_fmt(objects.cal_title, "%s %d", MONTHS[ti->tm_mon], ti->tm_year + 1900);
+    lv_label_set_text_fmt(objects.cal_title, "%s %d", MONTHS[disp_month], disp_year);
 
-    struct tm first = { .tm_year = ti->tm_year, .tm_mon = ti->tm_mon, .tm_mday = 1, .tm_isdst = -1 };
+    struct tm first = { .tm_year = disp_year - 1900, .tm_mon = disp_month, .tm_mday = 1, .tm_isdst = -1 };
     mktime(&first);
     int start_dow = (first.tm_wday + 6) % 7;    /* 0 = Monday */
 
     /* day 0 of the next month normalises to the last day of this one */
-    struct tm last = { .tm_year = ti->tm_year, .tm_mon = ti->tm_mon + 1, .tm_mday = 0, .tm_isdst = -1 };
+    struct tm last = { .tm_year = disp_year - 1900, .tm_mon = disp_month + 1, .tm_mday = 0, .tm_isdst = -1 };
     mktime(&last);
     int days_in_month = last.tm_mday;
 
-    for (int c = 0; c < 7; c++) {
-        char col[8 + CAL_ROWS * 4];
-        size_t n = (size_t)snprintf(col, sizeof(col), "%s", DOW[c]);
-        for (int r = 0; r < CAL_ROWS && n < sizeof(col) - 1; r++) {
-            int day = r * 7 + c - start_dow + 1;
-            if (day >= 1 && day <= days_in_month) {
-                n += (size_t)snprintf(col + n, sizeof(col) - n, "\n%d", day);
+    /* day 0 of *this* month normalises to the last day of the *previous*
+       one - the same trick, one month earlier, for numbering leading days. */
+    struct tm prev = { .tm_year = disp_year - 1900, .tm_mon = disp_month, .tm_mday = 0, .tm_isdst = -1 };
+    mktime(&prev);
+    int prev_days_in_month = prev.tm_mday;
+
+    for (int r = 0; r < CAL_ROWS; r++) {
+        for (int c = 0; c < 7; c++) {
+            int day_offset = r * 7 + c - start_dow + 1;
+            int shown_day;
+            const lv_font_t *font;
+
+            if (day_offset < 1) {
+                shown_day = prev_days_in_month + day_offset;
+                font = &lv_font_montserrat_12;
+            } else if (day_offset > days_in_month) {
+                shown_day = day_offset - days_in_month;
+                font = &lv_font_montserrat_12;
             } else {
-                n += (size_t)snprintf(col + n, sizeof(col) - n, "\n");
+                shown_day = day_offset;
+                font = &lv_font_montserrat_14;
             }
+
+            lv_obj_set_style_text_font(s_cal_days[r][c], font, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_label_set_text_fmt(s_cal_days[r][c], "%d", shown_day);
         }
-        lv_label_set_text(s_cal_cols[c], col);
     }
 
-    int idx = start_dow + ti->tm_mday - 1;
-    lv_obj_set_pos(objects.cal_today,
-                   CAL_COL_X0 + (idx % 7) * CAL_COL_W + 2,
-                   CAL_GRID_Y + (1 + idx / 7) * CAL_ROW_H - 1);
-    lv_obj_remove_flag(objects.cal_today, LV_OBJ_FLAG_HIDDEN);
+    /* "Today" only makes sense - and is only shown - when the displayed
+       month is the real current one. */
+    if (disp_year == today->tm_year + 1900 && disp_month == today->tm_mon) {
+        int idx = start_dow + today->tm_mday - 1;
+        lv_obj_set_pos(objects.cal_today,
+                       CAL_COL_X0 + (idx % 7) * CAL_COL_W + 2,
+                       CAL_GRID_Y + (1 + idx / 7) * CAL_ROW_H - 1);
+        lv_obj_remove_flag(objects.cal_today, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(objects.cal_today, LV_OBJ_FLAG_HIDDEN);
+    }
 
-    lv_label_set_text_static(objects.quote, QUOTES[ti->tm_yday % NUM_QUOTES]);
+    lv_label_set_text_static(objects.quote, QUOTES[today->tm_yday % NUM_QUOTES]);
 
     lv_obj_invalidate(objects.calendar);
 }
