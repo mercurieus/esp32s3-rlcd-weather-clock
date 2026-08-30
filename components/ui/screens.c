@@ -321,10 +321,26 @@ static void draw_clock_face(lv_layer_t *layer)
     lv_draw_line_dsc_init(&line_dsc);
     line_dsc.color = lv_color_hex(0x000000);
     line_dsc.opa = LV_OPA_COVER;
-    line_dsc.width = 3;
 
-    /* Only the 12 hour marks: 60 minute ticks at 1 px do not survive the
-       1 bit threshold and just turn the rim into noise. */
+    /* 60 minor ticks, skipping the 12 positions the major ticks already
+       cover (every 5th one). 2 px wide, 4 px long, r=58 - 1 px does not
+       survive the 1 bit threshold at this spacing. */
+    line_dsc.width = 2;
+    for (int i = 0; i < 60; i++) {
+        if (i % 5 == 0) continue;
+        double angle = (i * 6 - 90) * M_PI / 180.0;
+        int inner = 58 - 4;
+        int outer = 58;
+        line_dsc.p1.x = CLOCK_CENTER + (int)(inner * cos(angle));
+        line_dsc.p1.y = CLOCK_CENTER + (int)(inner * sin(angle));
+        line_dsc.p2.x = CLOCK_CENTER + (int)(outer * cos(angle));
+        line_dsc.p2.y = CLOCK_CENTER + (int)(outer * sin(angle));
+        lv_draw_line(layer, &line_dsc);
+    }
+
+    /* Only the 12 hour marks: verified to survive the 1 bit threshold at
+       this spacing (60 minute ticks did not, at 1 px - see above). */
+    line_dsc.width = 3;
     for (int i = 0; i < 12; i++) {
         double angle = (i * 30 - 90) * M_PI / 180.0;
         int inner = CLOCK_RADIUS - 11;
@@ -349,9 +365,7 @@ static void draw_clock_face(lv_layer_t *layer)
     lv_draw_arc(layer, &arc_dsc);
 }
 
-/* No second hand: it cost a full 400x300 panel refresh every second and the
-   old 0x888888 stroke thresholded to white, so it was never visible anyway. */
-void update_clock_hands(int hour, int minute)
+void update_clock_hands(int hour, int minute, int second)
 {
     lv_obj_t *canvas = objects.clock_canvas;
     if (!canvas) return;
@@ -380,6 +394,12 @@ void update_clock_hands(int hour, int minute)
     line_dsc.width = 3;
     line_dsc.p2.x = CLOCK_CENTER + (int)(52 * cos(m_angle));
     line_dsc.p2.y = CLOCK_CENTER + (int)(52 * sin(m_angle));
+    lv_draw_line(&layer, &line_dsc);
+
+    double s_angle = (second * 6 - 90) * M_PI / 180.0;
+    line_dsc.width = 2;
+    line_dsc.p2.x = CLOCK_CENTER + (int)(58 * cos(s_angle));
+    line_dsc.p2.y = CLOCK_CENTER + (int)(58 * sin(s_angle));
     lv_draw_line(&layer, &line_dsc);
 
     lv_draw_rect_dsc_t rect_dsc;
@@ -438,8 +458,8 @@ static const char *QUOTES[] = {
 #define CAL_GRID_W        (CAL_COL_W * 7)
 #define CAL_GRID_BOTTOM   (CAL_GRID_Y + (CAL_ROWS + 1) * CAL_ROW_H)
 
-#define CAL_CLOCK_X       240
-#define CAL_CLOCK_Y       52
+#define CAL_CLOCK_X       238
+#define CAL_CLOCK_Y       62
 
 #define CAL_FC_Y          210
 #define CAL_FC_W          100
@@ -576,7 +596,7 @@ void create_screen_calendar() {
             objects.clock_canvas = canvas;
             lv_canvas_set_buffer(canvas, clock_buf, CLOCK_SIZE, CLOCK_SIZE, LV_COLOR_FORMAT_RGB565);
             lv_obj_set_pos(canvas, CAL_CLOCK_X, CAL_CLOCK_Y);
-            update_clock_hands(0, 0);
+            update_clock_hands(0, 0, 0);
         }
     }
 
