@@ -150,9 +150,9 @@ void Overlay_Create(void)
 
     /* Battery: a hollow outlined box (default transparent bg), consistent
        with the other readings sitting straight on the rail. */
-    overlay_frame(top, 330, 4, 58, 24);        /* battery body - hollow outline */
-    overlay_frame(top, 388, 9, 6, 14);         /* nub */
-    s_battery = overlay_label(top, 333, 6, 52, LV_TEXT_ALIGN_CENTER, "0.00");
+    overlay_frame(top, 330, 3, 58, 26);        /* battery body - hollow outline */
+    overlay_frame(top, 388, 8, 6, 15);         /* nub */
+    s_battery = overlay_label(top, 333, 5, 52, LV_TEXT_ALIGN_CENTER, "0.00");
 
     /* Focus frame. 3 px so it survives the 1 bit threshold, and hidden
        until a focusable element is selected. */

@@ -390,10 +390,9 @@ static void draw_minor_dots(lv_obj_t *canvas)
    the canvas each time. Screen-space coords feed Dither_Threshold so the
    ring tiles with the header rail.
 
-   The ring's outer radius (CLOCK_RADIUS + 10 = 78) exceeds the 75 px
-   half-canvas, so the ring's four cardinal extremes fall outside the
-   150 px canvas and are clipped - the ring is slightly cropped at top,
-   bottom, left and right (accepted; note for hardware).
+   The ring band is r 70..74 (CLOCK_RADIUS+2 .. CLOCK_RADIUS+6), whose
+   outer edge (74) stays inside the 75 px half-canvas, so the ring renders
+   complete - no clipping at the four cardinal points.
 
    The ring carries a radial grey gradient (bright in the middle of its
    band, dark at the inner and outer edges), thresholded through the Bayer
@@ -405,9 +404,9 @@ static void draw_clock_bezel(lv_obj_t *canvas)
         for (int x = 0; x < CLOCK_SIZE; x++) {
             double dx = x - CLOCK_CENTER, dy = y - CLOCK_CENTER;
             double r = sqrt(dx * dx + dy * dy);
-            if (r < CLOCK_RADIUS + 2 || r > CLOCK_RADIUS + 10) continue;
-            double band_mid = CLOCK_RADIUS + 6;
-            double t = 1.0 - fabs(r - band_mid) / 4.0;   /* 1 at mid, 0 at edges */
+            if (r < CLOCK_RADIUS + 2 || r > CLOCK_RADIUS + 6) continue;
+            double band_mid = CLOCK_RADIUS + 4;
+            double t = 1.0 - fabs(r - band_mid) / 2.0;   /* 1 at mid, 0 at edges */
             if (t < 0.0) t = 0.0;
             uint8_t g = (uint8_t)(80.0 + 150.0 * t);      /* 80..230 */
             if (Dither_Threshold(CAL_CLOCK_X + x, CAL_CLOCK_Y + y, g)) {
