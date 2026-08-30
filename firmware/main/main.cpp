@@ -16,29 +16,42 @@ DisplayPort RlcdPort(12, 11, 5, 40, 41, LCD_WIDTH, LCD_HEIGHT);
 
 static void Lvgl_FlushCallback(lv_display_t *drv, const lv_area_t *area, uint8_t *color_map)
 {
-    /* A refresh pass can flush several disjoint dirty rects in a row (e.g.
-       a screen switch or the hint overlay showing/hiding touches multiple
-       widgets at once). RLCD_WaitTransferDone()'s semaphore is only ever
-       re-given by the completion callback behind RLCD_Display(), which
-       fires just once per pass - so the wait must also happen just once
-       per pass, before the pass's first pixel write, not on every flush
-       call. Waiting unconditionally here would consume the semaphore's
-       token on the first (non-last) flush and never get it back,
-       deadlocking the very next flush of the same pass.
-       Windowed partial-refresh (sending just the changed sub-rectangle
-       instead of the full panel) was implemented and hardware-tested
-       2026-08-30, then rolled back: the ST7305's visible settle artifact
-       tracks how much of a window's OWN content changes, not the window's
-       pixel area, so no geometry-based windowing policy reliably separated
-       an acceptable case from an unacceptable one on real hardware - see
-       git history and docs/superpowers/specs/2026-08-30-windowed-partial-
-       refresh-design.md for the full investigation. Always a full-panel
-       send now. */
+    /* A refresh pass can flush several disjoint dirty rects in a row
+       (e.g. a screen switch or the hint overlay showing/hiding touches
+       multiple widgets at once). RLCD_WaitTransferDone()'s semaphore is
+       only ever re-given by the completion callback behind whichever send
+       RLCD_DisplayAuto() below picks, which now fires just once per pass -
+       so the wait must also happen just once per pass, before the pass's
+       first pixel write, not on every flush call. Waiting unconditionally
+       here would consume the semaphore's token on the first (non-last)
+       flush and never get it back, deadlocking the very next flush of the
+       same pass. s_batch_x1/y1/x2/y2 track the union of every dirty rect
+       in the pass, so a compound change (several widgets at once) still
+       windows to one rectangle covering everything touched, sent once.
+       Windowed partial-refresh was tried once already (2026-08-30) and
+       rolled back when it seemed to make no visible difference - that
+       test turned out to be invalid: the real cause of the visible
+       "roll" was a settling delay that had been removed from
+       Lvgl_Refresh() by an unrelated, earlier fix (see that function's
+       comment and commit 04e0c4e), and every windowing test ran without
+       it. With the delay restored, this is windowing's first clean test -
+       see the SDD ledger and docs/superpowers/specs/2026-08-30-windowed-
+       partial-refresh-design.md for the full history either way. */
     static bool s_batch_in_progress = false;
+    static int s_batch_x1, s_batch_y1, s_batch_x2, s_batch_y2;
     if (!s_batch_in_progress)
     {
         RlcdPort.RLCD_WaitTransferDone();
         s_batch_in_progress = true;
+        s_batch_x1 = area->x1; s_batch_y1 = area->y1;
+        s_batch_x2 = area->x2; s_batch_y2 = area->y2;
+    }
+    else
+    {
+        if (area->x1 < s_batch_x1) s_batch_x1 = area->x1;
+        if (area->y1 < s_batch_y1) s_batch_y1 = area->y1;
+        if (area->x2 > s_batch_x2) s_batch_x2 = area->x2;
+        if (area->y2 > s_batch_y2) s_batch_y2 = area->y2;
     }
 
     uint16_t *buffer = (uint16_t *)color_map;
@@ -51,13 +64,14 @@ static void Lvgl_FlushCallback(lv_display_t *drv, const lv_area_t *area, uint8_t
             buffer++;
         }
     }
-    /* Only the last flush of a refresh pass needs to trigger the actual
-       transfer: sending after every dirty rect produced N redundant sends
-       in a row (see the history of this function for the batching fix
-       this superseded). */
+    /* RLCD_DisplayAuto() windows the union rect's send on this hardware -
+       see its own comment. Only the last flush of a refresh pass needs to
+       trigger the actual transfer: sending after every dirty rect produced
+       N redundant sends in a row (see the history of this function for the
+       batching fix this superseded). */
     if (lv_display_flush_is_last(drv))
     {
-        RlcdPort.RLCD_Display();
+        RlcdPort.RLCD_DisplayAuto(s_batch_x1, s_batch_y1, s_batch_x2, s_batch_y2);
         s_batch_in_progress = false;
     }
     lv_disp_flush_ready(drv);
@@ -72,6 +86,7 @@ extern "C" void app_main(void)
     Selftest_Begin();
     ClockTime_RunTests();
     Nav_RunTests();
+    DisplayBsp_RunTests();
     Selftest_End();
 
     RlcdPort.RLCD_Init();
