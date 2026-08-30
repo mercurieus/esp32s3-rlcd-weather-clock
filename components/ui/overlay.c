@@ -36,19 +36,16 @@ static void canvas_dither_fill(lv_obj_t *canvas, int canvas_x, int canvas_y,
     }
 }
 
-/* A solid 2 px block, not an lv_line: hairlines dither away on a 1 bit
-   panel. */
-static void overlay_rule(lv_obj_t *parent, int x, int y, int w)
+/* Rolled-rail highlight for the header bar: darkest at the top and bottom
+   edges, a bright "ridge" about a third of the way down. This is the "real
+   per-pixel grey gradient" the spec asks for - a flat fill just reads as a
+   uniform tint. */
+static uint8_t rail_grey(int y)
 {
-    lv_obj_t *o = lv_obj_create(parent);
-    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_pos(o, x, y);
-    lv_obj_set_size(o, w, 2);
-    lv_obj_set_style_pad_all(o, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_radius(o, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_width(o, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(o, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    int d = y - 11;                 /* ridge ~1/3 down the 30px band */
+    if (d < 0) d = -d;
+    int g = 225 - d * 9;            /* 225 at the ridge, ~-9/row falloff */
+    return (uint8_t)(g < 70 ? 70 : g);
 }
 
 static lv_obj_t *overlay_frame(lv_obj_t *parent, int x, int y, int w, int h)
@@ -146,7 +143,9 @@ void Overlay_Create(void)
         lv_canvas_set_buffer(band, s_rail_buf, 400, 34, LV_COLOR_FORMAT_RGB565);
         lv_canvas_fill_bg(band, lv_color_hex(0xffffff), LV_OPA_COVER);
 
-        canvas_dither_fill(band, 0, 0, 0, 0, 400, 30, 160);
+        for (int gy = 0; gy < 30; gy++) {
+            canvas_dither_fill(band, 0, gy, 0, gy, 400, 1, rail_grey(gy));
+        }
         for (int x = 0; x < 400; x++) {
             lv_canvas_set_px(band, x, 10, lv_color_hex(0xffffff), LV_OPA_COVER);   /* bright ridge */
             lv_canvas_set_px(band, x, 29, lv_color_hex(0x000000), LV_OPA_COVER);   /* dark lower lip */
@@ -156,16 +155,11 @@ void Overlay_Create(void)
     lv_obj_set_pos(band, 0, 0);
     lv_obj_set_size(band, 400, 34);
 
-    /* Battery plaque first, so the battery outline frames draw on top of it.
-       Each plaque is sized to contain its reading's widest value at
+    /* Each plaque is sized to contain its reading's widest value at
        montserrat_20 ("-88.8" / "100%" / "01.01.2000" / "4.20") with a ~3 px
        margin, and sits in the rail's clean band (y 2..27, above the dark
        lower lip at y 29..30). The label is inset ~3 px inside its plaque.
        Visible dithered-metal gaps between plaques are intentional. */
-    overlay_plaque(top, 328, 2, 58, 25);
-    overlay_frame(top, 329, 5, 64, 26);   /* battery body */
-    overlay_frame(top, 391, 10, 7, 16);   /* battery nub  */
-
     overlay_plaque(top, 0, 2, 60, 25);
     s_temp    = overlay_label(top, 3, 5, 0, LV_TEXT_ALIGN_LEFT, "0.0");
 
@@ -175,9 +169,14 @@ void Overlay_Create(void)
     overlay_plaque(top, 132, 2, 116, 25);
     s_date    = overlay_label(top, 135, 5, 0, LV_TEXT_ALIGN_LEFT, "01.01.2000");
 
-    s_battery = overlay_label(top, 330, 5, 52, LV_TEXT_ALIGN_CENTER, "0.00");
-
-    overlay_rule(top, 0, 34, 400);
+    /* The battery reading's outlined box IS its plaque: an opaque white
+       fill inside the black border, so the dithered rail never shows
+       through and the outline wraps the fill wraps the centred text. */
+    lv_obj_t *batt_box = overlay_frame(top, 330, 4, 60, 24);   /* body */
+    lv_obj_set_style_bg_color(batt_box, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(batt_box, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    overlay_frame(top, 390, 9, 6, 14);                         /* nub */
+    s_battery = overlay_label(top, 333, 6, 54, LV_TEXT_ALIGN_CENTER, "0.00");
 
     /* Focus frame. 3 px so it survives the 1 bit threshold, and hidden
        until a focusable element is selected. */
