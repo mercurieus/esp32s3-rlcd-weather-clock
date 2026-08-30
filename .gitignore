@@ -1,0 +1,6 @@
+# Root-level editor/local config for opening this repo with the ESP-IDF
+# project pinned to firmware/ via .vscode/settings.json's idf.projectPath.
+# Machine-specific (COM port, local esp-idf path) - same convention as
+# firmware/.gitignore's own .vscode/ rule.
+.vscode/
+build/
