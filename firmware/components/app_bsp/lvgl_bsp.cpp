@@ -72,9 +72,11 @@ void Lvgl_PortInit(int width, int height, DispFlushCb flush_cb)
        not the whole tree - the colon blink alone used to force a full
        400x300 composite every second. This used to also mean a tick with
        multiple dirty rects cost one full SPI send per rect; Lvgl_FlushCallback
-       now batches every dirty rect in one refresh pass into a single send,
-       windowed to the union of what actually changed (RLCD_DisplayAuto(),
-       see display_bsp.cpp) instead of always shipping the whole panel. */
+       now batches every dirty rect in one refresh pass into a single send
+       (see its own comment). The send itself still ships the whole panel
+       (RLCD_Display()) - windowed partial-refresh was tried twice on real
+       hardware and didn't help either time, see Lvgl_FlushCallback's
+       comment in main.cpp. */
     lv_display_set_buffers(disp, buffer_1, buffer_2, buffer_size, LV_DISPLAY_RENDER_MODE_PARTIAL);
 
     s_last_tick_us = esp_timer_get_time();
