@@ -1,5 +1,13 @@
 # Windowed Partial Refresh Implementation Plan
 
+> **Outcome (2026-08-30):** implemented, hardware-tested across three policy
+> variants, and reverted - windowing never reliably reduced the roll this
+> plan was written to fix. The actual root cause (a settling delay removed
+> by an earlier, unrelated fix) was found and corrected separately; see the
+> correction note at the top of this plan's spec
+> (`docs/superpowers/specs/2026-08-30-windowed-partial-refresh-design.md`)
+> and commit `04e0c4e`. Kept as a historical record only.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the ST7305 panel's unconditional full-frame SPI send in the LVGL flush path with a windowed send sized to the actual dirty area, so small/localized UI changes settle visibly faster than the ~50px/sec full-panel roll.

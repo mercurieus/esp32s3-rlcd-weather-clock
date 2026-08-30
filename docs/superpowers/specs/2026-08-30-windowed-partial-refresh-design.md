@@ -1,5 +1,30 @@
 # Windowed Partial Refresh Design
 
+> **Correction (2026-08-30, after this spec's implementation was hardware-tested
+> and reverted):** the root-cause conclusion below - "the roll is the ST7305
+> panel's own liquid-crystal optical settling time, a physical property" - is
+> wrong. A direct hardware A/B test against the commit right before Task 1's
+> `RLCD_WaitTransferDone()` fix (`ff95e25`) showed that build had NO visible
+> roll. That commit *also* removed a blind `vTaskDelay(pdMS_TO_TICKS(50))`
+> that used to run after every LVGL refresh pass, believing it to be a
+> redundant, unproven race-condition workaround superseded by the new
+> semaphore wait. It was redundant for the DMA race (the semaphore genuinely
+> fixes that), but it was independently also giving the ST7305 panel time to
+> finish its own internal settle cycle after a send - something
+> `on_color_trans_done` firing on SPI-wire completion doesn't guarantee.
+> Restoring that delay (`firmware/components/app_bsp/lvgl_bsp.cpp`,
+> `Lvgl_Refresh()`, commit `04e0c4e`) eliminated the roll entirely, full-panel
+> sends included. The windowed partial-refresh design and implementation
+> below never had a chance of fixing the actual cause, which is why every
+> policy variant tried on hardware (always-window, threshold-gated,
+> clock-digit-allow-list) showed no reliable improvement - see
+> `firmware/main/main.cpp`'s git history for that build-and-revert sequence.
+> The rest of this document is kept as a historical record of the addressing
+> reverse-engineering (CASET/RASET math, `DispBuffer` packing) and of a
+> plausible-seeming but ultimately incorrect root-cause chain - useful if
+> windowing is ever revisited for a genuine reason (e.g. SPI bus contention
+> with another peripheral), but not as an explanation of the roll.
+
 ## Context
 
 `DisplayPort::RLCD_Display()` (`firmware/components/port_bsp/display_bsp.cpp`) always
