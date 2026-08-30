@@ -10,6 +10,7 @@
 #include "vars.h"
 #include "styles.h"
 #include "ui.h"
+#include "dither.h"
 
 #include <string.h>
 
@@ -307,6 +308,14 @@ void tick_screen_main() {
 #define CLOCK_CENTER 75
 #define CLOCK_RADIUS 68
 
+/* Dial's screen position on the Cal+Clock screen (x 238..388, y 62..212). */
+#define CAL_CLOCK_X       238
+#define CAL_CLOCK_Y       62
+
+#define MINOR_DOT_RADIUS 64     /* near the rim, "closer to the end of the dial" */
+#define MINOR_DOT_SIZE   3      /* 3x3 px block - axis-aligned, no diagonal speckle */
+#define MINOR_DOT_GREY   128    /* dithered mid-grey: lighter than the solid hour ticks */
+
 /* The panel is 1 bit (main.cpp thresholds RGB565 at 0x7fff), so everything
    drawn here must be pure black and >= 2 px wide - anti-aliased 1 px strokes
    land near the threshold and break up into speckle. */
@@ -322,24 +331,10 @@ static void draw_clock_face(lv_layer_t *layer)
     line_dsc.color = lv_color_hex(0x000000);
     line_dsc.opa = LV_OPA_COVER;
 
-    /* 60 minor ticks, skipping the 12 positions the major ticks already
-       cover (every 5th one). 2 px wide, 4 px long, r=58 - 1 px does not
-       survive the 1 bit threshold at this spacing. */
-    line_dsc.width = 2;
-    for (int i = 0; i < 60; i++) {
-        if (i % 5 == 0) continue;
-        double angle = (i * 6 - 90) * M_PI / 180.0;
-        int inner = 58 - 4;
-        int outer = 58;
-        line_dsc.p1.x = CLOCK_CENTER + (int)(inner * cos(angle));
-        line_dsc.p1.y = CLOCK_CENTER + (int)(inner * sin(angle));
-        line_dsc.p2.x = CLOCK_CENTER + (int)(outer * cos(angle));
-        line_dsc.p2.y = CLOCK_CENTER + (int)(outer * sin(angle));
-        lv_draw_line(layer, &line_dsc);
-    }
-
     /* Only the 12 hour marks: verified to survive the 1 bit threshold at
-       this spacing (60 minute ticks did not, at 1 px - see above). */
+       this spacing. The 60 minor ticks are dithered dots painted separately
+       (draw_minor_dots) - as 2 px radial lines they broke into speckle at
+       diagonal angles under the threshold. */
     line_dsc.width = 3;
     for (int i = 0; i < 12; i++) {
         double angle = (i * 30 - 90) * M_PI / 180.0;
@@ -365,12 +360,38 @@ static void draw_clock_face(lv_layer_t *layer)
     lv_draw_arc(layer, &arc_dsc);
 }
 
+/* The 60 minor ticks, as 3x3 dithered-grey dots near the rim. Painted with
+   lv_canvas_set_px straight on the canvas, which must run outside the
+   lv_canvas_init_layer / finish_layer pair. Screen-space coords are fed to
+   Dither_Threshold so the pattern tiles consistently with the rest of the UI. */
+static void draw_minor_dots(lv_obj_t *canvas)
+{
+    const int half = MINOR_DOT_SIZE / 2;
+    for (int i = 0; i < 60; i++) {
+        if (i % 5 == 0) continue;                 /* skip the 12 hour positions */
+        double a = (i * 6 - 90) * M_PI / 180.0;
+        int cx = CLOCK_CENTER + (int)(MINOR_DOT_RADIUS * cos(a));
+        int cy = CLOCK_CENTER + (int)(MINOR_DOT_RADIUS * sin(a));
+        for (int dy = -half; dy <= half; dy++) {
+            for (int dx = -half; dx <= half; dx++) {
+                int px = cx + dx, py = cy + dy;
+                if (px < 0 || py < 0 || px >= CLOCK_SIZE || py >= CLOCK_SIZE) continue;
+                if (Dither_Threshold(CAL_CLOCK_X + px, CAL_CLOCK_Y + py, MINOR_DOT_GREY)) {
+                    lv_canvas_set_px(canvas, px, py, lv_color_hex(0x000000), LV_OPA_COVER);
+                }
+            }
+        }
+    }
+}
+
 void update_clock_hands(int hour, int minute, int second)
 {
     lv_obj_t *canvas = objects.clock_canvas;
     if (!canvas) return;
 
     lv_canvas_fill_bg(canvas, lv_color_hex(0xFFFFFF), LV_OPA_COVER);
+
+    draw_minor_dots(canvas);
 
     lv_layer_t layer;
     lv_canvas_init_layer(canvas, &layer);
@@ -458,8 +479,8 @@ static const char *QUOTES[] = {
 #define CAL_GRID_W        (CAL_COL_W * 7)
 #define CAL_GRID_BOTTOM   (CAL_GRID_Y + (CAL_ROWS + 1) * CAL_ROW_H)
 
-#define CAL_CLOCK_X       238
-#define CAL_CLOCK_Y       62
+/* CAL_CLOCK_X / CAL_CLOCK_Y are defined up with the CLOCK_* block, since the
+   dial's dither helper needs them and it sits next to draw_clock_face(). */
 
 #define CAL_FC_Y          210
 #define CAL_FC_W          100

@@ -337,9 +337,19 @@ static void clock_task(void *arg)
 
     int last_sync_hour = -1;
     int last_minute = -1;
+    int64_t prev_work_us = 0;
     for (;;) {
-        esp_sleep_enable_timer_wakeup(1000000ULL);
+        /* Hold a real 1s cadence: the per-second Cal+Clock dial redraw adds
+           ~150-200ms of render+SPI work per iteration, and a fixed 1s sleep
+           on top of that made the RTC read skip a second in a regular beat.
+           Sleep only the remainder of the second after last iteration's work. */
+        uint64_t sleep_us = prev_work_us >= 1000000
+                                ? 1000
+                                : (1000000ULL - (uint64_t)prev_work_us);
+        esp_sleep_enable_timer_wakeup(sleep_us);
         esp_light_sleep_start();
+
+        int64_t cycle_start_us = esp_timer_get_time();
 
         struct tm now_utc;
         struct tm now;
@@ -452,6 +462,8 @@ static void clock_task(void *arg)
             }
             Lvgl_unlock();
         }
+
+        prev_work_us = esp_timer_get_time() - cycle_start_us;
     }
 }
 
