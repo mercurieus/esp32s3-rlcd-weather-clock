@@ -55,13 +55,11 @@ static void Lvgl_FlushCallback(lv_display_t *drv, const lv_area_t *area, uint8_t
             buffer++;
         }
     }
-    /* RLCD_DisplayAuto() sends only the union rect's window when that's
-       smaller than the ~80%-height fallback threshold, and the existing
-       full-panel RLCD_Display() otherwise - see its own comment. Only the
-       last flush of a refresh pass needs to trigger the actual transfer:
-       sending after every dirty rect produced N redundant sends in a row
-       (see the history of this function for the batching fix this
-       superseded). */
+    /* RLCD_DisplayAuto() windows the union rect's send on this hardware -
+       see its own comment. Only the last flush of a refresh pass needs to
+       trigger the actual transfer: sending after every dirty rect produced
+       N redundant sends in a row (see the history of this function for the
+       batching fix this superseded). */
     if (lv_display_flush_is_last(drv))
     {
         RlcdPort.RLCD_DisplayAuto(s_batch_x1, s_batch_y1, s_batch_x2, s_batch_y2);
