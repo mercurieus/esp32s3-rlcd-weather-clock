@@ -304,13 +304,13 @@ void create_screen_main() {
 void tick_screen_main() {
 }
 
-#define CLOCK_SIZE 150
-#define CLOCK_CENTER 75
+#define CLOCK_SIZE 156
+#define CLOCK_CENTER 78
 #define CLOCK_RADIUS 68
 
-/* Dial's screen position on the Cal+Clock screen (x 238..388, y 62..212). */
+/* Dial's screen position on the Cal+Clock screen (x 238..394, y 46..202). */
 #define CAL_CLOCK_X       238
-#define CAL_CLOCK_Y       62
+#define CAL_CLOCK_Y       46
 
 #define MINOR_DOT_RADIUS 64     /* near the rim, "closer to the end of the dial" */
 #define MINOR_DOT_SIZE   3      /* 3x3 px block - axis-aligned, no diagonal speckle */
@@ -323,6 +323,10 @@ void tick_screen_main() {
 #define CLOCK_BUF_SIZE LV_CANVAS_BUF_SIZE(CLOCK_SIZE, CLOCK_SIZE, 16, LV_DRAW_BUF_STRIDE_ALIGN)
 
 static uint8_t *clock_buf = NULL;
+
+/* HH:MM readout on the analog face - a canvas child, created in
+   create_screen_calendar, fed by update_clock_hands. */
+static lv_obj_t *s_clock_digital;
 
 static void draw_clock_face(lv_layer_t *layer)
 {
@@ -390,9 +394,9 @@ static void draw_minor_dots(lv_obj_t *canvas)
    the canvas each time. Screen-space coords feed Dither_Threshold so the
    ring tiles with the header rail.
 
-   The ring band is r 70..74 (CLOCK_RADIUS+2 .. CLOCK_RADIUS+6), whose
-   outer edge (74) stays inside the 75 px half-canvas, so the ring renders
-   complete - no clipping at the four cardinal points.
+   The ring band is r 70..76 (CLOCK_RADIUS+2 .. CLOCK_RADIUS+8), whose
+   outer edge (76) stays inside the 78 px half-canvas (156 px canvas), so
+   the ring renders complete - no clipping at the four cardinal points.
 
    The ring carries a radial grey gradient (bright in the middle of its
    band, dark at the inner and outer edges), thresholded through the Bayer
@@ -404,9 +408,9 @@ static void draw_clock_bezel(lv_obj_t *canvas)
         for (int x = 0; x < CLOCK_SIZE; x++) {
             double dx = x - CLOCK_CENTER, dy = y - CLOCK_CENTER;
             double r = sqrt(dx * dx + dy * dy);
-            if (r < CLOCK_RADIUS + 2 || r > CLOCK_RADIUS + 6) continue;
-            double band_mid = CLOCK_RADIUS + 4;
-            double t = 1.0 - fabs(r - band_mid) / 2.0;   /* 1 at mid, 0 at edges */
+            if (r < CLOCK_RADIUS + 2 || r > CLOCK_RADIUS + 8) continue;
+            double band_mid = CLOCK_RADIUS + 5;
+            double t = 1.0 - fabs(r - band_mid) / 3.0;   /* 1 at mid, 0 at edges */
             if (t < 0.0) t = 0.0;
             uint8_t g = (uint8_t)(80.0 + 150.0 * t);      /* 80..230 */
             if (Dither_Threshold(CAL_CLOCK_X + x, CAL_CLOCK_Y + y, g)) {
@@ -420,6 +424,10 @@ void update_clock_hands(int hour, int minute, int second)
 {
     lv_obj_t *canvas = objects.clock_canvas;
     if (!canvas) return;
+
+    if (s_clock_digital) {
+        lv_label_set_text_fmt(s_clock_digital, "%02d:%02d", hour, minute);
+    }
 
     lv_canvas_fill_bg(canvas, lv_color_hex(0xFFFFFF), LV_OPA_COVER);
 
@@ -503,7 +511,7 @@ static const char *QUOTES[] = {
 //   82..202  day grid: a 6x7 array of individual day-cell labels, one per
 //            cell (leading/trailing days render in a smaller font, so they
 //            cannot share a multi-line label with the current month)
-//   52..202  analog clock canvas (right hand side)
+//   46..202  analog clock canvas (right side), digital HH:MM on the face
 //   210..244 four day weather row
 //   254..296 quote of the day
 //
@@ -717,6 +725,19 @@ void create_screen_calendar() {
             lv_canvas_set_buffer(canvas, clock_buf, CLOCK_SIZE, CLOCK_SIZE, LV_COLOR_FORMAT_RGB565);
             lv_obj_set_pos(canvas, CAL_CLOCK_X, CAL_CLOCK_Y);
             update_clock_hands(0, 0, 0);
+
+            s_clock_digital = lv_label_create(canvas);
+            lv_obj_set_style_bg_color(s_clock_digital, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_bg_opa(s_clock_digital, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_pad_hor(s_clock_digital, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_pad_ver(s_clock_digital, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_border_color(s_clock_digital, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_border_opa(s_clock_digital, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_border_width(s_clock_digital, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_text_font(s_clock_digital, &lv_font_montserrat_14, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_text_color(s_clock_digital, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_label_set_text(s_clock_digital, "00:00");
+            lv_obj_align(s_clock_digital, LV_ALIGN_CENTER, 0, 28);   /* lower-centre of the face, below the hub */
         }
     }
 
