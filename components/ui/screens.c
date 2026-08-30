@@ -393,8 +393,12 @@ static void draw_minor_dots(lv_obj_t *canvas)
    The ring's outer radius (CLOCK_RADIUS + 10 = 78) exceeds the 75 px
    half-canvas, so the ring's four cardinal extremes fall outside the
    150 px canvas and are clipped - the ring is slightly cropped at top,
-   bottom, left and right (accepted; note for hardware). Every set_px is
-   guarded against the canvas bounds regardless. */
+   bottom, left and right (accepted; note for hardware).
+
+   The ring carries a radial grey gradient (bright in the middle of its
+   band, dark at the inner and outer edges), thresholded through the Bayer
+   matrix, so it reads as a rounded metal rim rather than a flat tint -
+   the "real per-pixel grey gradient" the spec asks for. */
 static void draw_clock_bezel(lv_obj_t *canvas)
 {
     for (int y = 0; y < CLOCK_SIZE; y++) {
@@ -402,7 +406,11 @@ static void draw_clock_bezel(lv_obj_t *canvas)
             double dx = x - CLOCK_CENTER, dy = y - CLOCK_CENTER;
             double r = sqrt(dx * dx + dy * dy);
             if (r < CLOCK_RADIUS + 2 || r > CLOCK_RADIUS + 10) continue;
-            if (Dither_Threshold(CAL_CLOCK_X + x, CAL_CLOCK_Y + y, 150)) {
+            double band_mid = CLOCK_RADIUS + 6;
+            double t = 1.0 - fabs(r - band_mid) / 4.0;   /* 1 at mid, 0 at edges */
+            if (t < 0.0) t = 0.0;
+            uint8_t g = (uint8_t)(80.0 + 150.0 * t);      /* 80..230 */
+            if (Dither_Threshold(CAL_CLOCK_X + x, CAL_CLOCK_Y + y, g)) {
                 lv_canvas_set_px(canvas, x, y, lv_color_hex(0x000000), LV_OPA_COVER);
             }
         }
