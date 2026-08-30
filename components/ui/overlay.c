@@ -36,16 +36,19 @@ static void canvas_dither_fill(lv_obj_t *canvas, int canvas_x, int canvas_y,
     }
 }
 
-/* Rolled-rail highlight for the header bar: darkest at the top and bottom
-   edges, a bright "ridge" about a third of the way down. This is the "real
-   per-pixel grey gradient" the spec asks for - a flat fill just reads as a
-   uniform tint. */
+/* The four readings ride directly on this rail (no plaques), so the band
+   under them must stay legibly light - a sparse Bayer stipple, mostly
+   white. A gentle gradient (a brighter ridge about a third of the way
+   down, a touch darker toward the band edges) keeps it reading as brushed
+   metal rather than flat, and the top/bottom 3 rows drop darker for a
+   bevelled edge. */
 static uint8_t rail_grey(int y)
 {
-    int d = y - 11;                 /* ridge ~1/3 down the 30px band */
-    if (d < 0) d = -d;
-    int g = 225 - d * 9;            /* 225 at the ridge, ~-9/row falloff */
-    return (uint8_t)(g < 70 ? 70 : g);
+    if (y <= 2)  return (uint8_t)(120 + y * 30);          /* 120,150,180  top bevel  */
+    if (y >= 27) return (uint8_t)(160 - (y - 27) * 25);   /* 160,135,110  bottom bevel */
+    int d = y - 11; if (d < 0) d = -d;                    /* ridge ~1/3 down */
+    int g = 234 - d * 3;                                  /* 234 at ridge ... ~200 */
+    return (uint8_t)(g < 198 ? 198 : g);
 }
 
 static lv_obj_t *overlay_frame(lv_obj_t *parent, int x, int y, int w, int h)
@@ -61,25 +64,6 @@ static lv_obj_t *overlay_frame(lv_obj_t *parent, int x, int y, int w, int h)
     lv_obj_set_style_border_opa(o, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(o, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
     return o;
-}
-
-/* A recessed white plaque: keeps text off the dithered rail (the hard
-   rule - dithering behind text destroys glyphs at this panel's pitch),
-   shaded to read as sunken via a dark top-left edge, light bottom-right. */
-static void overlay_plaque(lv_obj_t *parent, int x, int y, int w, int h)
-{
-    lv_obj_t *o = lv_obj_create(parent);
-    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_pos(o, x, y);
-    lv_obj_set_size(o, w, h);
-    lv_obj_set_style_pad_all(o, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_radius(o, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(o, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(o, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(o, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_side(o, LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_width(o, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
 }
 
 static lv_obj_t *overlay_label(lv_obj_t *parent, int x, int y, int width,
@@ -155,28 +139,20 @@ void Overlay_Create(void)
     lv_obj_set_pos(band, 0, 0);
     lv_obj_set_size(band, 400, 34);
 
-    /* Each plaque is sized to contain its reading's widest value at
-       montserrat_20 ("-88.8" / "100%" / "01.01.2000" / "4.20") with a ~3 px
-       margin, and sits in the rail's clean band (y 2..27, above the dark
-       lower lip at y 29..30). The label is inset ~3 px inside its plaque.
-       Visible dithered-metal gaps between plaques are intentional. */
-    overlay_plaque(top, 0, 2, 60, 25);
+    /* Kindle-style: the four readings ride straight on the metal rail, no
+       plaques. rail_grey keeps the text band a light, sparse stipple so
+       20pt black text stays legible on it. Label x positions leave room
+       for each reading's widest value at montserrat_20 ("-88.8" / "100%" /
+       "01.01.2000" / "4.20"). */
     s_temp    = overlay_label(top, 3, 5, 0, LV_TEXT_ALIGN_LEFT, "0.0");
-
-    overlay_plaque(top, 64, 2, 58, 25);
     s_hum     = overlay_label(top, 67, 5, 0, LV_TEXT_ALIGN_LEFT, "0%");
-
-    overlay_plaque(top, 132, 2, 116, 25);
     s_date    = overlay_label(top, 135, 5, 0, LV_TEXT_ALIGN_LEFT, "01.01.2000");
 
-    /* The battery reading's outlined box IS its plaque: an opaque white
-       fill inside the black border, so the dithered rail never shows
-       through and the outline wraps the fill wraps the centred text. */
-    lv_obj_t *batt_box = overlay_frame(top, 330, 4, 60, 24);   /* body */
-    lv_obj_set_style_bg_color(batt_box, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(batt_box, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    overlay_frame(top, 390, 9, 6, 14);                         /* nub */
-    s_battery = overlay_label(top, 333, 6, 54, LV_TEXT_ALIGN_CENTER, "0.00");
+    /* Battery: a hollow outlined box (default transparent bg), consistent
+       with the other readings sitting straight on the rail. */
+    overlay_frame(top, 330, 4, 58, 24);        /* battery body - hollow outline */
+    overlay_frame(top, 388, 9, 6, 14);         /* nub */
+    s_battery = overlay_label(top, 333, 6, 52, LV_TEXT_ALIGN_CENTER, "0.00");
 
     /* Focus frame. 3 px so it survives the 1 bit threshold, and hidden
        until a focusable element is selected. */
