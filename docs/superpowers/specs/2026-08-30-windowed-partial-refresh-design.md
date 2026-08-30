@@ -59,15 +59,18 @@ production implementation of that windowing.
   outside its intended area, and must never miss real dirty pixels (over-scan
   is fine, under-scan is not).
 - Keep `RLCD_Display()` itself unchanged and available as the full-panel
-  fallback - both for the 5+ existing call sites unrelated to LVGL (init,
-  color-clear, etc.) and for the new auto-dispatch's own fallback path.
+  fallback: an explicit boot-sync send right after `RLCD_Init()` (so the
+  panel and `DispBuffer` are known to agree before any windowed send can
+  run - `RLCD_Init()`'s own `RLCD_ColorClear()` only `memset`s `DispBuffer`,
+  it never sends), and the new auto-dispatch's own dimension-mismatch
+  fallback path.
 
 ## Non-goals
 
 - Re-deriving the CASET/RASET addressing itself - already hardware-confirmed
   (see below), not re-investigated here.
-- Windowing the non-LVGL call sites (`RLCD_Init()`'s startup clear, etc.) -
-  those aren't in a hot path and stay as full sends.
+- Windowing the non-LVGL call sites (the boot-sync send after
+  `RLCD_Init()`, etc.) - those aren't in a hot path and stay as full sends.
 - Any change to the FRCTRL frame-rate register - tested, refuted, not revisited.
 - Double-buffering `DispBuffer` - out of scope, unrelated to this problem.
 
@@ -207,16 +210,27 @@ correct.
 One `memcpy` per `byte_x` column in range - `(re - rs + 1)` copies, each of a
 contiguous run already sitting in `DispBuffer`.
 
-### Fallback threshold
+### Fallback: dimension guard, not a coverage threshold
 
-If the rounded window's CASET span covers more than ~80% of the panel's
-height (`caset_xe - caset_xs + 1 >= 20` of the 25 total units), skip
-windowing and call the existing `RLCD_Display()` instead - the copy and
-addressing overhead isn't worth it when the window is nearly the full panel
-anyway. This threshold is expressed in CASET (vertical) units specifically,
-since vertical span is what the spike measured as the lever that speeds up
-settling; a window's horizontal extent doesn't independently affect this
-decision.
+The original design here fell back to the existing `RLCD_Display()` above
+~80% CASET-unit coverage, on the theory that a near-full window wouldn't be
+worth the extraction overhead. Dropped after hardware verification: a
+Main<->Cal+Clock screen switch - the actual case this was meant to help -
+still fell back every time, because LVGL's own `lv_screen_load()`
+invalidates close to the whole new screen regardless of any threshold value
+(it doesn't diff old vs. new pixel content, it marks the whole newly-shown
+screen dirty). The threshold was never shrinking anything for that case; it
+just added a second code path with no measurable benefit anywhere.
+
+`RLCD_DisplayAuto()`'s only remaining fallback is a dimension guard: if the
+`DisplayPort` instance isn't the exact 400x300 landscape panel
+`RLCD_ComputeWindow()`'s addressing math is hardcoded for, fall back to
+`RLCD_Display()` rather than silently misaddress or overrun `DispBuffer`
+through a future differently-sized panel. On this hardware that guard never
+triggers - every send windows, including the near-full-panel case, at the
+cost of one extra ~15000-byte `memcpy` into `WindowBuffer` before the
+identical SPI send (microseconds against the multi-second settle time this
+feature exists to shrink).
 
 ### Batch integration (`Lvgl_FlushCallback`, `firmware/main/main.cpp`)
 
@@ -285,13 +299,19 @@ same "exactly one send per batch" shape Task 1 already established.
 
 ## Roadmap note
 
-Not in scope here, but worth recording: this design's 80%-height fallback
-threshold means a full screen switch (Main to Cal+Clock and back) will likely
-still fall back to a full-panel send today, since both screens differ across
-nearly their whole height. The more valuable win from this work is on
-same-screen compound changes that touch a bounded vertical band - the hint
-overlay (a fixed-height band near the bottom), the top bar (a fixed-height
-band at the top), and future Cal+Clock month-browsing arrows (Task 4 of the
-paused Vista redraw plan). Screen-switch roll may need its own follow-up
-(e.g. an actual crossfade-free "wipe" using two or three sequential windowed
-sends) if it's still bothersome after this lands - not designed here.
+Not in scope here, but worth recording: a full screen switch (Main to
+Cal+Clock and back) still shows the pre-existing slow roll after this
+design lands, hardware-confirmed. Not because of the fallback threshold
+(dropped - see Fallback above) but because LVGL's own `lv_screen_load()`
+invalidates close to the whole new screen on every switch, so the computed
+window is already near-full for that specific case regardless of any
+threshold. The value win from this work is on same-screen compound changes
+that touch a bounded vertical band - the hint overlay (a fixed-height band
+near the bottom, hardware-confirmed faster with no corruption), the top bar
+(a fixed-height band at the top), and future Cal+Clock month-browsing
+arrows (Task 4 of the paused Vista redraw plan). Speeding up the screen
+switch itself would need a fundamentally different mechanism - real
+pixel-level diffing against the previous frame's actual bytes to find the
+genuinely-smaller region that visually differs, rather than trusting LVGL's
+coarse "whole screen is dirty" signal - which is meaningfully more work
+than this design and not attempted here.
