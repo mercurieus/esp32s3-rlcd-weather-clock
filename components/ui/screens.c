@@ -399,7 +399,6 @@ static void draw_clock_bezel(lv_obj_t *canvas)
 {
     for (int y = 0; y < CLOCK_SIZE; y++) {
         for (int x = 0; x < CLOCK_SIZE; x++) {
-            if (x < 0 || y < 0 || x >= CLOCK_SIZE || y >= CLOCK_SIZE) continue;
             double dx = x - CLOCK_CENTER, dy = y - CLOCK_CENTER;
             double r = sqrt(dx * dx + dy * dy);
             if (r < CLOCK_RADIUS + 2 || r > CLOCK_RADIUS + 10) continue;

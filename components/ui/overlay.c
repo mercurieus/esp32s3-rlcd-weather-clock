@@ -91,7 +91,7 @@ static lv_obj_t *overlay_label(lv_obj_t *parent, int x, int y, int width,
     lv_obj_t *l = lv_label_create(parent);
     lv_obj_set_pos(l, x, y);
     lv_obj_set_size(l, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_26, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(l, &lv_font_montserrat_20, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(l, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     if (width > 0) {
         lv_obj_set_style_min_width(l, width, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -156,21 +156,26 @@ void Overlay_Create(void)
     lv_obj_set_pos(band, 0, 0);
     lv_obj_set_size(band, 400, 34);
 
-    /* Battery plaque first, so the battery outline frames draw on top of it. */
-    overlay_plaque(top, 330, 1, 62, 22);
+    /* Battery plaque first, so the battery outline frames draw on top of it.
+       Each plaque is sized to contain its reading's widest value at
+       montserrat_20 ("-88.8" / "100%" / "01.01.2000" / "4.20") with a ~3 px
+       margin, and sits in the rail's clean band (y 2..27, above the dark
+       lower lip at y 29..30). The label is inset ~3 px inside its plaque.
+       Visible dithered-metal gaps between plaques are intentional. */
+    overlay_plaque(top, 328, 2, 58, 25);
     overlay_frame(top, 329, 5, 64, 26);   /* battery body */
     overlay_frame(top, 391, 10, 7, 16);   /* battery nub  */
 
-    overlay_plaque(top, 0, 1, 84, 22);
-    s_temp    = overlay_label(top, 2, 3, 0, LV_TEXT_ALIGN_LEFT, "0.0");
+    overlay_plaque(top, 0, 2, 60, 25);
+    s_temp    = overlay_label(top, 3, 5, 0, LV_TEXT_ALIGN_LEFT, "0.0");
 
-    overlay_plaque(top, 87, 1, 60, 22);
-    s_hum     = overlay_label(top, 89, 3, 0, LV_TEXT_ALIGN_LEFT, "0%");
+    overlay_plaque(top, 64, 2, 58, 25);
+    s_hum     = overlay_label(top, 67, 5, 0, LV_TEXT_ALIGN_LEFT, "0%");
 
-    overlay_plaque(top, 161, 1, 100, 22);
-    s_date    = overlay_label(top, 163, 3, 0, LV_TEXT_ALIGN_LEFT, "01.01.2000");
+    overlay_plaque(top, 132, 2, 116, 25);
+    s_date    = overlay_label(top, 135, 5, 0, LV_TEXT_ALIGN_LEFT, "01.01.2000");
 
-    s_battery = overlay_label(top, 332, 3, 58, LV_TEXT_ALIGN_CENTER, "0.00");
+    s_battery = overlay_label(top, 330, 5, 52, LV_TEXT_ALIGN_CENTER, "0.00");
 
     overlay_rule(top, 0, 34, 400);
 
