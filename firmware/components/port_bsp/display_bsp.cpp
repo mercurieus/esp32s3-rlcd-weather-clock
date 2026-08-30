@@ -4,6 +4,56 @@
 #include <esp_log.h>
 #include "display_bsp.h"
 
+RlcdWindow RLCD_ComputeWindow(int width, int height, int x1, int y1, int x2, int y2)
+{
+    /* Clamp to panel bounds first - defensive against any caller passing
+       out-of-range LVGL coordinates. Each coordinate is clamped
+       independently (not just the "outer" bound of each pair), and a
+       reversed rect (x1>x2 or y1>y2) is un-reversed by swapping - both
+       matter because a rect that ends up with x1>x2 or y1>y2 after
+       clamping alone produces a negative RlcdWindow.len, which reaches
+       esp_lcd_panel_io_tx_color()'s size_t parameter as a huge unsigned
+       value. Unreachable through LVGL today (it clips flush areas to the
+       display), but this function's contract promises full clamping, so
+       it should actually deliver that. */
+    if (x1 < 0) x1 = 0;
+    if (x1 > width - 1)  x1 = width - 1;
+    if (x2 < 0) x2 = 0;
+    if (x2 > width - 1)  x2 = width - 1;
+    if (y1 < 0) y1 = 0;
+    if (y1 > height - 1) y1 = height - 1;
+    if (y2 < 0) y2 = 0;
+    if (y2 > height - 1) y2 = height - 1;
+    if (x1 > x2) { int t = x1; x1 = x2; x2 = t; }
+    if (y1 > y2) { int t = y1; y1 = y2; y2 = t; }
+
+    /* X (RASET): 2px/unit, no inversion. */
+    uint8_t rs = (uint8_t)(x1 >> 1);
+    uint8_t re = (uint8_t)(x2 >> 1);
+
+    /* Y (CASET): 12px/unit (3 InitLandscapeLUT() block_y groups of 4 rows
+       each), Y-inverted via inv_y = height-1-y, and CASET *decreases* as
+       screen-Y increases (hardware-confirmed: CASET's low end measured at
+       the top of the screen, where inv_y/block_y is largest). */
+    int inv_y1 = height - 1 - y1;
+    int inv_y2 = height - 1 - y2;
+    int by_a = inv_y1 >> 2;
+    int by_b = inv_y2 >> 2;
+    int by_lo = (by_a < by_b) ? by_a : by_b;
+    int by_hi = (by_a > by_b) ? by_a : by_b;
+    int g_lo = by_lo / 3;   /* integer division already expands to the
+                                enclosing 12px-aligned band */
+    int g_hi = by_hi / 3;
+
+    RlcdWindow w;
+    w.caset_xs = (uint8_t)(42 - g_hi);   /* larger block_y group -> smaller CASET */
+    w.caset_xe = (uint8_t)(42 - g_lo);   /* smaller block_y group -> larger CASET */
+    w.raset_ys = rs;
+    w.raset_ye = re;
+    w.len = (int)(w.caset_xe - w.caset_xs + 1) * (int)(w.raset_ye - w.raset_ys + 1) * 3;
+    return w;
+}
+
 DisplayPort::DisplayPort(int mosi, int scl, int dc, int cs, int rst, int width, int height, spi_host_device_t spihost) :
 mosi_(mosi),
 scl_(scl),
@@ -57,6 +107,18 @@ height_(height)
     DisplayLen                = transfer >> 3;
     DispBuffer                = (uint8_t *) heap_caps_malloc(DisplayLen, MALLOC_CAP_SPIRAM);
     assert(DispBuffer);
+    /* Persistent scratch buffer for RLCD_DisplayWindow(), sized to the
+       full-panel worst case. Reused across calls rather than malloc/free
+       per send - RLCD_Sendbuffera() queues an async DMA transfer and
+       returns immediately, so freeing a buffer right after queuing it
+       would race the still-in-flight send (this is the exact bug the
+       windowed-refresh spike's own diagnostic code hit). Safe to reuse
+       for the same reason DispBuffer itself already is: the next batch's
+       RLCD_WaitTransferDone() (called before that batch's first pixel
+       write) guarantees any previous transfer has completed before either
+       buffer is touched again. */
+    WindowBuffer               = (uint8_t *) heap_caps_malloc(DisplayLen, MALLOC_CAP_SPIRAM);
+    assert(WindowBuffer);
 
 #if (AlgorithmOptimization == 3)
     PixelIndexLUT = (uint16_t (*)[300])heap_caps_malloc(transfer * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
@@ -208,14 +270,10 @@ void DisplayPort::RLCD_ColorClear(uint8_t color) {
 }
 
 /* Always ships the whole packed panel buffer, fixed to the full-screen
-   column/row window - it does not know or care which pixels actually
-   changed. Windowed partial-refresh (sending just a changed sub-rectangle)
-   was implemented and hardware-tested 2026-08-30, then rolled back: the
-   panel's visible settle artifact tracks how much of a window's own
-   content changes, not the window's pixel area, so no geometry-based
-   windowing policy reliably separated an acceptable case from an
-   unacceptable one on real hardware - see git history and
-   docs/superpowers/specs/2026-08-30-windowed-partial-refresh-design.md. */
+   column/row window. This is the deliberate full-panel path: used for
+   every non-LVGL send (init, boot sync) and as RLCD_DisplayAuto()'s
+   dimension-mismatch safety fallback. For an arbitrary sub-rectangle, see
+   RLCD_DisplayWindow() and RLCD_ComputeWindow(). */
 void DisplayPort::RLCD_Display() {
     RLCD_SendCommand(0x2A);
     RLCD_SendData(0x12);
@@ -228,6 +286,66 @@ void DisplayPort::RLCD_Display() {
     RLCD_SendCommand(0x2c);
 
     RLCD_Sendbuffera(DispBuffer, DisplayLen);
+}
+
+/* Sends a windowed sub-rectangle instead of the full panel. x1/y1/x2/y2 are
+   inclusive screen-space coordinates; RLCD_ComputeWindow() rounds them to a
+   valid CASET/RASET window and the matching payload length - see that
+   function for the addressing math. Writes into the persistent
+   WindowBuffer (not a fresh allocation - see the constructor) so it needs
+   no wait of its own: like RLCD_Display(), it queues an async send and
+   relies on the caller's existing wait/send discipline (Task 1's
+   RLCD_WaitTransferDone(), called at the start of the next batch) before
+   either buffer is touched again. */
+void DisplayPort::RLCD_DisplayWindow(int x1, int y1, int x2, int y2) {
+    RlcdWindow w = RLCD_ComputeWindow(width_, height_, x1, y1, x2, y2);
+
+    int H4 = height_ >> 2;
+    int by_start = (42 - w.caset_xe) * 3;
+    int run_len  = (w.caset_xe - w.caset_xs + 1) * 3;
+    int cursor = 0;
+    for (int bx = w.raset_ys; bx <= w.raset_ye; bx++) {
+        memcpy(WindowBuffer + cursor, &DispBuffer[bx * H4 + by_start], run_len);
+        cursor += run_len;
+    }
+
+    RLCD_SendCommand(0x2A);
+    RLCD_SendData(w.caset_xs);
+    RLCD_SendData(w.caset_xe);
+
+    RLCD_SendCommand(0x2B);
+    RLCD_SendData(w.raset_ys);
+    RLCD_SendData(w.raset_ye);
+
+    RLCD_SendCommand(0x2c);
+    RLCD_Sendbuffera(WindowBuffer, w.len);
+}
+
+/* Always windows the LVGL-reported dirty area, with one safety fallback:
+   RLCD_ComputeWindow()'s addressing math (the "42", the /3 grouping, H4)
+   is hardcoded for this exact 400x300 landscape panel via
+   InitLandscapeLUT()'s packing - a different panel size/orientation would
+   silently misaddress or overrun DispBuffer through this path (see
+   RLCD_ComputeWindow()'s own header comment). Guard on the actual
+   dimensions rather than trust every future caller to know that.
+
+   An earlier version of this function also fell back to RLCD_Display()
+   above ~80% height coverage, on the theory that a near-full window
+   wouldn't be worth the extraction overhead. Dropped: LVGL's own screen-
+   switch invalidation is already close to full-height (lv_screen_load()
+   marks the whole new screen dirty, it doesn't diff old vs. new pixel
+   content), so that threshold was never actually shrinking anything for
+   the case it was meant to help - it just added a second code path with
+   no measurable benefit. Windowing the full panel costs one extra
+   ~15000-byte memcpy into WindowBuffer before the identical SPI send;
+   microseconds against the multi-second panel settle time this whole
+   feature exists to shrink. */
+void DisplayPort::RLCD_DisplayAuto(int x1, int y1, int x2, int y2) {
+    if (width_ != 400 || height_ != 300) {
+        RLCD_Display();
+        return;
+    }
+    RLCD_DisplayWindow(x1, y1, x2, y2);
 }
 
 void DisplayPort::RLCD_Reset(void) {
