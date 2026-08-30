@@ -33,6 +33,26 @@ void Lvgl_Refresh(void)
     lv_tick_inc(elapsed_ms);
     lv_timer_handler();
     lv_refr_now(NULL);
+
+    /* Hardware A/B test (2026-08-30): flashing the commit right before this
+       delay was first removed (ff95e25, "wait for the actual SPI transfer
+       instead of a padded delay") showed NO visible vertical roll/settle
+       artifact on large redraws (screen switches) - while every later
+       build without this delay did, across three different SPI-wait and
+       windowed-refresh designs that all failed to fix it. What was chased
+       for most of this session as an inherent ST7305 settling limitation
+       was actually a side effect of removing this delay.
+       This is NOT the DispBuffer race-condition fix ff95e25 made -
+       RLCD_WaitTransferDone() (called from Lvgl_FlushCallback before
+       DispBuffer is next written) stays and is still correct. This delay
+       is separate: on_color_trans_done fires when the SPI peripheral has
+       finished shifting bytes out over MOSI, not when the panel itself has
+       finished its own internal RAM-write/settle cycle after receiving
+       them - so code that proceeds the instant the wire-level transfer
+       completes can still be racing the panel's own internal state. The
+       exact mechanism isn't confirmed beyond the A/B result; 50ms matches
+       the original (removed) delay's value pending a more precise number. */
+    vTaskDelay(pdMS_TO_TICKS(50));
 }
 
 void Lvgl_PortInit(int width, int height, DispFlushCb flush_cb)
