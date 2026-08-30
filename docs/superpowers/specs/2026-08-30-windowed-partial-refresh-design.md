@@ -19,6 +19,16 @@
 > policy variant tried on hardware (always-window, threshold-gated,
 > clock-digit-allow-list) showed no reliable improvement - see
 > `firmware/main/main.cpp`'s git history for that build-and-revert sequence.
+> Independently corroborated: Waveshare's own reference examples for this
+> exact board (`ESP32-S3-RLCD-4.2/02_Example/ESP-IDF/{08_LVGL_V8_Test,
+> 09_LVGL_V9_Test}`, this project's likely ancestor) hardcode the identical
+> 50ms as `LVGL_TASK_MIN_DELAY_MS`, the floor on their own background LVGL
+> task's polling interval - the same requirement enforced by a standing
+> task's pacing instead of an explicit delay. This project has no
+> equivalent task (`ClockTask` calls `esp_light_sleep_start()` to sleep the
+> CPU between updates, incompatible with a free-running ~50ms-cadence
+> task), so `Lvgl_Refresh()` pays this cost explicitly - see
+> `RLCD_PANEL_SETTLE_DELAY_MS` in `lvgl_bsp.h`.
 > The rest of this document is kept as a historical record of the addressing
 > reverse-engineering (CASET/RASET math, `DispBuffer` packing) and of a
 > plausible-seeming but ultimately incorrect root-cause chain - useful if
