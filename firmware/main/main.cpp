@@ -19,17 +19,30 @@ static void Lvgl_FlushCallback(lv_display_t *drv, const lv_area_t *area, uint8_t
     /* A refresh pass can flush several disjoint dirty rects in a row
        (e.g. a screen switch or the hint overlay showing/hiding touches
        multiple widgets at once). RLCD_WaitTransferDone()'s semaphore is
-       only ever re-given by RLCD_Display()'s completion callback below,
-       which now fires just once per pass - so the wait must also happen
-       just once per pass, before the pass's first pixel write, not on
-       every flush call. Waiting unconditionally here would consume the
-       semaphore's token on the first (non-last) flush and never get it
-       back, deadlocking the very next flush of the same pass. */
+       only ever re-given by the completion callback behind whichever send
+       RLCD_DisplayAuto() below picks, which now fires just once per pass -
+       so the wait must also happen just once per pass, before the pass's
+       first pixel write, not on every flush call. Waiting unconditionally
+       here would consume the semaphore's token on the first (non-last)
+       flush and never get it back, deadlocking the very next flush of the
+       same pass. s_batch_x1/y1/x2/y2 track the union of every dirty rect
+       in the pass, so a compound change (several widgets at once) still
+       windows to one rectangle covering everything touched, sent once. */
     static bool s_batch_in_progress = false;
+    static int s_batch_x1, s_batch_y1, s_batch_x2, s_batch_y2;
     if (!s_batch_in_progress)
     {
         RlcdPort.RLCD_WaitTransferDone();
         s_batch_in_progress = true;
+        s_batch_x1 = area->x1; s_batch_y1 = area->y1;
+        s_batch_x2 = area->x2; s_batch_y2 = area->y2;
+    }
+    else
+    {
+        if (area->x1 < s_batch_x1) s_batch_x1 = area->x1;
+        if (area->y1 < s_batch_y1) s_batch_y1 = area->y1;
+        if (area->x2 > s_batch_x2) s_batch_x2 = area->x2;
+        if (area->y2 > s_batch_y2) s_batch_y2 = area->y2;
     }
 
     uint16_t *buffer = (uint16_t *)color_map;
@@ -42,18 +55,16 @@ static void Lvgl_FlushCallback(lv_display_t *drv, const lv_area_t *area, uint8_t
             buffer++;
         }
     }
-    /* RLCD_Display() always ships the entire packed panel buffer over SPI
-       (its column/row addressing is fixed-window - see the comment on
-       RLCD_Display() itself), so there is nothing to gain by sending after
-       every dirty rect: only the last flush of a refresh pass needs to
-       trigger the actual transfer. Sending after each of N dirty rects
-       produced N redundant full-panel sends in a row, each one now
-       visible as its own top-to-bottom scan since RLCD_WaitTransferDone()
-       properly serializes them - a compound UI change (screen switch,
-       hint show/hide) looked like a slow, gradual multi-step redraw. */
+    /* RLCD_DisplayAuto() sends only the union rect's window when that's
+       smaller than the ~80%-height fallback threshold, and the existing
+       full-panel RLCD_Display() otherwise - see its own comment. Only the
+       last flush of a refresh pass needs to trigger the actual transfer:
+       sending after every dirty rect produced N redundant sends in a row
+       (see the history of this function for the batching fix this
+       superseded). */
     if (lv_display_flush_is_last(drv))
     {
-        RlcdPort.RLCD_Display();
+        RlcdPort.RLCD_DisplayAuto(s_batch_x1, s_batch_y1, s_batch_x2, s_batch_y2);
         s_batch_in_progress = false;
     }
     lv_disp_flush_ready(drv);
