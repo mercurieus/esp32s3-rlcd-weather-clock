@@ -16,7 +16,7 @@ The project was written from scratch in **VS Code with ESP-IDF**, with help from
 
 ## Setup
 
-Before flashing, edit the config headers under `firmware/components/clock/` with your own details:
+Before flashing, edit the config headers under `components/clock/` with your own details:
 
 - `clock_config.h` — your Wi-Fi SSID and password
 - `weather_config.h` — your location (latitude / longitude) for the weather forecast
