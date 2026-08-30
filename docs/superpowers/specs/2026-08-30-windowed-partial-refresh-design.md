@@ -24,6 +24,17 @@
 > plausible-seeming but ultimately incorrect root-cause chain - useful if
 > windowing is ever revisited for a genuine reason (e.g. SPI bus contention
 > with another peripheral), but not as an explanation of the roll.
+>
+> **Follow-up (same day):** with the settling delay restored, the
+> implementation below got one clean re-test - windowing on top of correct
+> timing, the comparison this document was actually meant to make. Still no
+> benefit: the hint overlay's window and a full-panel screen switch settled
+> at about the same visible speed. So the addressing/extraction work here
+> is real and correct, but the premise it served - that a smaller window
+> settles faster - doesn't hold on this panel. The settle cost looks fixed
+> per send, not proportional to window area. Reverted again
+> (commit `3b16fc2`), this time on solid evidence rather than a confounded
+> test.
 
 ## Context
 
