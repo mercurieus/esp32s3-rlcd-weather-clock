@@ -1,5 +1,5 @@
 """Exhaustive invariant check of the nav transition table in
-firmware/components/ui/nav.c. Mirrors the C logic; if you change one,
+components/ui/nav.c. Mirrors the C logic; if you change one,
 change both. Run: python tools/verify_nav.py"""
 
 import itertools
