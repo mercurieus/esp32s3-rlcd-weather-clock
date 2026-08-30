@@ -74,6 +74,8 @@ class DisplayPort {
     void RLCD_SendData(uint8_t Data);
     void RLCD_Sendbuffera(uint8_t *Data, int len);
     void RLCD_Reset(void);
+    /* Only RLCD_DisplayAuto() calls this - not part of the public API. */
+    void RLCD_DisplayWindow(int x1, int y1, int x2, int y2);
 
   public:
     DisplayPort(int mosi, int scl, int dc, int cs, int rst, int width, int height, spi_host_device_t spihost = SPI3_HOST);
@@ -81,7 +83,6 @@ class DisplayPort {
     void RLCD_Init();
     void RLCD_ColorClear(uint8_t color);
     void RLCD_Display();
-    void RLCD_DisplayWindow(int x1, int y1, int x2, int y2);
     void RLCD_DisplayAuto(int x1, int y1, int x2, int y2);
     void RLCD_WaitTransferDone();
     #if (AlgorithmOptimization != 3)

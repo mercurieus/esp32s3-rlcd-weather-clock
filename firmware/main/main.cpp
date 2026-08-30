@@ -83,6 +83,26 @@ extern "C" void app_main(void)
     Selftest_End();
 
     RlcdPort.RLCD_Init();
+    /* The windowed-refresh design depends on an implicit invariant: the
+       physical panel and DispBuffer must already agree on everything
+       outside whatever window a later windowed send covers, since a
+       windowed send only writes ITS OWN rectangle - it never touches the
+       rest of the panel. RLCD_Init() only memsets DispBuffer to white
+       (RLCD_ColorClear) and never sends anything, so without this, the
+       panel's actual contents are whatever they were left in before this
+       boot (stale, from before flashing, or garbage) until something
+       happens to send a full frame. Make that explicit instead of relying
+       on LVGL's first screen-load happening to invalidate enough of the
+       display to cover for it.
+       Order matters: WaitTransferDone() first consumes the semaphore's
+       initial free token (given in the constructor, nothing in flight
+       yet), so RLCD_Display() right after it queues a send behind a
+       semaphore that's now correctly "taken" - the next WaitTransferDone()
+       call (the first real LVGL flush) will genuinely block until this
+       transfer completes rather than falling through on a token nobody
+       consumed yet. */
+    RlcdPort.RLCD_WaitTransferDone();
+    RlcdPort.RLCD_Display();
     gpio_sleep_sel_dis(GPIO_NUM_12);
     gpio_sleep_sel_dis(GPIO_NUM_11);
     gpio_sleep_sel_dis(GPIO_NUM_5);

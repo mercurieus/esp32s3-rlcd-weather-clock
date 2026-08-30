@@ -7,11 +7,25 @@
 RlcdWindow RLCD_ComputeWindow(int width, int height, int x1, int y1, int x2, int y2)
 {
     /* Clamp to panel bounds first - defensive against any caller passing
-       out-of-range LVGL coordinates. */
+       out-of-range LVGL coordinates. Each coordinate is clamped
+       independently (not just the "outer" bound of each pair), and a
+       reversed rect (x1>x2 or y1>y2) is un-reversed by swapping - both
+       matter because a rect that ends up with x1>x2 or y1>y2 after
+       clamping alone produces a negative RlcdWindow.len, which reaches
+       esp_lcd_panel_io_tx_color()'s size_t parameter as a huge unsigned
+       value. Unreachable through LVGL today (it clips flush areas to the
+       display), but this function's contract promises full clamping, so
+       it should actually deliver that. */
     if (x1 < 0) x1 = 0;
-    if (y1 < 0) y1 = 0;
+    if (x1 > width - 1)  x1 = width - 1;
+    if (x2 < 0) x2 = 0;
     if (x2 > width - 1)  x2 = width - 1;
+    if (y1 < 0) y1 = 0;
+    if (y1 > height - 1) y1 = height - 1;
+    if (y2 < 0) y2 = 0;
     if (y2 > height - 1) y2 = height - 1;
+    if (x1 > x2) { int t = x1; x1 = x2; x2 = t; }
+    if (y1 > y2) { int t = y1; y1 = y2; y2 = t; }
 
     /* X (RASET): 2px/unit, no inversion. */
     uint8_t rs = (uint8_t)(x1 >> 1);
@@ -256,11 +270,10 @@ void DisplayPort::RLCD_ColorClear(uint8_t color) {
 }
 
 /* Always ships the whole packed panel buffer, fixed to the full-screen
-   column/row window - it does not know or care which pixels actually
-   changed. Windowing this to an arbitrary sub-rectangle would need the
-   panel's column/row addressing worked out against its packing (see
-   RLCD_SetLandscapePixel), which isn't documented anywhere in this repo;
-   left as a full send rather than guess at that on real hardware. */
+   column/row window. This is the deliberate full-panel path: used for
+   every non-LVGL send (init, boot sync) and as RLCD_DisplayAuto()'s
+   dimension-mismatch safety fallback. For an arbitrary sub-rectangle, see
+   RLCD_DisplayWindow() and RLCD_ComputeWindow(). */
 void DisplayPort::RLCD_Display() {
     RLCD_SendCommand(0x2A);
     RLCD_SendData(0x12);
@@ -308,24 +321,31 @@ void DisplayPort::RLCD_DisplayWindow(int x1, int y1, int x2, int y2) {
     RLCD_Sendbuffera(WindowBuffer, w.len);
 }
 
-/* Picks between a windowed send and the existing full-panel RLCD_Display(),
-   based on how much of the panel's height the rounded window would cover.
-   Windowing costs a small extraction loop and a slightly more complex
-   command sequence than a plain full send; that's only worth paying when
-   it actually shrinks the area the panel has to physically settle. Above
-   ~80% height coverage (20 of the 25 total CASET units), the two paths
-   would settle at roughly the same visible speed, so this falls back to
-   the simpler, already-proven full send rather than window a change that's
-   nearly the whole screen anyway. */
-void DisplayPort::RLCD_DisplayAuto(int x1, int y1, int x2, int y2) {
-    RlcdWindow w = RLCD_ComputeWindow(width_, height_, x1, y1, x2, y2);
+/* Always windows the LVGL-reported dirty area, with one safety fallback:
+   RLCD_ComputeWindow()'s addressing math (the "42", the /3 grouping, H4)
+   is hardcoded for this exact 400x300 landscape panel via
+   InitLandscapeLUT()'s packing - a different panel size/orientation would
+   silently misaddress or overrun DispBuffer through this path (see
+   RLCD_ComputeWindow()'s own header comment). Guard on the actual
+   dimensions rather than trust every future caller to know that.
 
-    int caset_units = (int)(w.caset_xe - w.caset_xs + 1);
-    if (caset_units >= 20) {
+   An earlier version of this function also fell back to RLCD_Display()
+   above ~80% height coverage, on the theory that a near-full window
+   wouldn't be worth the extraction overhead. Dropped: LVGL's own screen-
+   switch invalidation is already close to full-height (lv_screen_load()
+   marks the whole new screen dirty, it doesn't diff old vs. new pixel
+   content), so that threshold was never actually shrinking anything for
+   the case it was meant to help - it just added a second code path with
+   no measurable benefit. Windowing the full panel costs one extra
+   ~15000-byte memcpy into WindowBuffer before the identical SPI send;
+   microseconds against the multi-second panel settle time this whole
+   feature exists to shrink. */
+void DisplayPort::RLCD_DisplayAuto(int x1, int y1, int x2, int y2) {
+    if (width_ != 400 || height_ != 300) {
         RLCD_Display();
-    } else {
-        RLCD_DisplayWindow(x1, y1, x2, y2);
+        return;
     }
+    RLCD_DisplayWindow(x1, y1, x2, y2);
 }
 
 void DisplayPort::RLCD_Reset(void) {
