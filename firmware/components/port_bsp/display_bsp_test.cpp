@@ -38,6 +38,12 @@ void DisplayBsp_RunTests(void)
     /* RASET-only rounding: a narrow horizontal slice (x 2-5) with the full
        height, isolating the X-axis rounding from the Y-axis math above. */
     check_window(400, 300, 2, 0, 5, 299, 18, 42, 1, 2, 150);
+
+    /* The hint overlay's actual production geometry (pos 8,268 size
+       384x28, from overlay.c) - x1=8,y1=268,x2=391,y2=295. This is the
+       real case this whole feature exists to serve: a bounded-height
+       change that should window rather than fall back to a full send. */
+    check_window(400, 300, 8, 268, 391, 295, 40, 42, 4, 195, 1728);
 }
 
 #else
