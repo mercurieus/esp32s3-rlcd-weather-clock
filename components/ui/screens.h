@@ -60,7 +60,7 @@ void tick_screen_main();
 void create_screen_calendar();
 void tick_screen_calendar();
 
-void update_clock_hands(int hour, int minute);
+void update_clock_hands(int hour, int minute, int second);
 void update_calendar_display(const struct tm *ti);
 void calendar_update_forecast(int idx, const char *date, const lv_image_dsc_t *icon, const char *temp);
 

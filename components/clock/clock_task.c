@@ -33,7 +33,7 @@ static bool s_battery_warning_active = false;
 static bool s_colon_visible = true;
 static int s_last_cal_day = -1;
 static int s_last_cal_mon = -1;
-static int s_last_cal_min = -1;
+static int s_last_cal_sec = -1;
 
 #define HINT_BOOT_MS   5000
 #define HINT_EVENT_MS  2500
@@ -366,10 +366,10 @@ static void clock_task(void *arg)
                         if (s_nav.mode == NAV_SCREEN &&
                             s_nav.screen == NAV_SCREEN_CALCLOCK) {
                             update_calendar_display(&now);
-                            update_clock_hands(now.tm_hour, now.tm_min);
+                            update_clock_hands(now.tm_hour, now.tm_min, now.tm_sec);
                             s_last_cal_day = now.tm_mday;
                             s_last_cal_mon = now.tm_mon;
-                            s_last_cal_min = now.tm_min;
+                            s_last_cal_sec = now.tm_sec;
                         }
                     }
                     hint_text_t h = hint_for_mode(&s_nav);
@@ -436,9 +436,9 @@ static void clock_task(void *arg)
                     s_last_cal_mon = now.tm_mon;
                     dirty = true;
                 }
-                if (now.tm_min != s_last_cal_min) {
-                    update_clock_hands(now.tm_hour, now.tm_min);
-                    s_last_cal_min = now.tm_min;
+                if (now.tm_sec != s_last_cal_sec) {
+                    update_clock_hands(now.tm_hour, now.tm_min, now.tm_sec);
+                    s_last_cal_sec = now.tm_sec;
                     dirty = true;
                 }
             } else {
