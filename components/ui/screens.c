@@ -463,9 +463,12 @@ static const char *QUOTES[] = {
 // Calendar screen layout (400 x 300, 1 bit panel)
 //
 //   0..36    top bar: temp / humidity / date / battery, rule at y=34
-//   40..58   month title
-//   62..202  day columns: one label per weekday, line 0 is the "Mo..Su"
-//            header, lines 1..6 are the week rows
+//   40..58   month title, flanked by the < / > browse arrows
+//            (x 6..25 and 196..215 at y 40)
+//   62..82   weekday header row: 7 fixed-width centred labels, "Mo".."Su"
+//   82..202  day grid: a 6x7 array of individual day-cell labels, one per
+//            cell (leading/trailing days render in a smaller font, so they
+//            cannot share a multi-line label with the current month)
 //   52..202  analog clock canvas (right hand side)
 //   210..244 four day weather row
 //   254..296 quote of the day
