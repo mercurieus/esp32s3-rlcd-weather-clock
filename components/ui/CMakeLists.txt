@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS
+        "dither.c"
         "images.c"
         "nav.c"
         "nav_test.c"
