@@ -308,6 +308,26 @@ void DisplayPort::RLCD_DisplayWindow(int x1, int y1, int x2, int y2) {
     RLCD_Sendbuffera(WindowBuffer, w.len);
 }
 
+/* Picks between a windowed send and the existing full-panel RLCD_Display(),
+   based on how much of the panel's height the rounded window would cover.
+   Windowing costs a small extraction loop and a slightly more complex
+   command sequence than a plain full send; that's only worth paying when
+   it actually shrinks the area the panel has to physically settle. Above
+   ~80% height coverage (20 of the 25 total CASET units), the two paths
+   would settle at roughly the same visible speed, so this falls back to
+   the simpler, already-proven full send rather than window a change that's
+   nearly the whole screen anyway. */
+void DisplayPort::RLCD_DisplayAuto(int x1, int y1, int x2, int y2) {
+    RlcdWindow w = RLCD_ComputeWindow(width_, height_, x1, y1, x2, y2);
+
+    int caset_units = (int)(w.caset_xe - w.caset_xs + 1);
+    if (caset_units >= 20) {
+        RLCD_Display();
+    } else {
+        RLCD_DisplayWindow(x1, y1, x2, y2);
+    }
+}
+
 void DisplayPort::RLCD_Reset(void) {
     Set_ResetIOLevel(1);
     vTaskDelay(pdMS_TO_TICKS(50));

@@ -82,6 +82,7 @@ class DisplayPort {
     void RLCD_ColorClear(uint8_t color);
     void RLCD_Display();
     void RLCD_DisplayWindow(int x1, int y1, int x2, int y2);
+    void RLCD_DisplayAuto(int x1, int y1, int x2, int y2);
     void RLCD_WaitTransferDone();
     #if (AlgorithmOptimization != 3)
     void RLCD_SetPortraitPixel(uint16_t x, uint16_t y, uint8_t color);
