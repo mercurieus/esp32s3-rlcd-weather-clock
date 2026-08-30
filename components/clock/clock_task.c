@@ -34,6 +34,8 @@ static bool s_colon_visible = true;
 static int s_last_cal_day = -1;
 static int s_last_cal_mon = -1;
 static int s_last_cal_sec = -1;
+static int s_cal_disp_year = -1;
+static int s_cal_disp_month = -1;
 
 #define HINT_BOOT_MS   5000
 #define HINT_EVENT_MS  2500
@@ -193,10 +195,10 @@ static void update_forecast_labels(const WeatherDay days[4])
     }
 }
 
-/* Main has five focusables; Cal+Clock gets its own in milestone 4. */
+/* Main has five focusables; Cal+Clock has two: the < and > month arrows. */
 static uint8_t nav_focus_count(uint8_t screen)
 {
-    return screen == NAV_SCREEN_MAIN ? 5 : 0;
+    return screen == NAV_SCREEN_MAIN ? 5 : 2;
 }
 
 static uint32_t now_ms(void)
@@ -251,6 +253,19 @@ static void main_focus_area(uint8_t index, lv_area_t *out)
     out->x2 = col + 99;  out->y2 = 283;
 }
 
+/* Absolute screen rectangles for Cal+Clock's focusable elements: 0 is the
+   previous-month arrow, 1 is next. Matches CAL_COL_X0/CAL_ARROW_W/
+   CAL_TITLE_Y in screens.c. */
+static void calclock_focus_area(uint8_t index, lv_area_t *out)
+{
+    const int y0 = 40, y1 = 58;    /* CAL_TITLE_Y .. CAL_TITLE_Y + 18 */
+    if (index == 0) {
+        out->x1 = 6;  out->y1 = y0;  out->x2 = 25;  out->y2 = y1;
+    } else {
+        out->x1 = 196; out->y1 = y0; out->x2 = 215; out->y2 = y1;
+    }
+}
+
 static void apply_nav_visuals(void)
 {
     /* Only load on an actual screen change. Focus moves must not reload the
@@ -260,11 +275,28 @@ static void apply_nav_visuals(void)
                        ? SCREEN_ID_MAIN
                        : SCREEN_ID_CALENDAR);
         s_loaded_screen = s_nav.screen;
+
+        if (s_nav.screen == NAV_SCREEN_CALCLOCK) {
+            /* Always reset to the real current month on entry - browsing
+               state never persists across leaving and returning to the
+               screen. */
+            struct tm now_utc, now;
+            if (Pcf85063_GetTime(&now_utc) == ESP_OK) {
+                ClockTime_UtcToLocal(&now_utc, &now);
+                s_cal_disp_year = now.tm_year + 1900;
+                s_cal_disp_month = now.tm_mon;
+                update_calendar_display(s_cal_disp_year, s_cal_disp_month, &now);
+            }
+        }
     }
 
-    if (s_nav.mode == NAV_FOCUS && s_nav.screen == NAV_SCREEN_MAIN) {
+    if (s_nav.mode == NAV_FOCUS) {
         lv_area_t a;
-        main_focus_area(s_nav.focus, &a);
+        if (s_nav.screen == NAV_SCREEN_MAIN) {
+            main_focus_area(s_nav.focus, &a);
+        } else {
+            calclock_focus_area(s_nav.focus, &a);
+        }
         Overlay_ShowFocus(&a);
     } else {
         Overlay_ShowFocus(NULL);
@@ -372,14 +404,32 @@ static void clock_task(void *arg)
                 const bool changed = nav_handle(&s_nav, ev);
                 if (Lvgl_lock(-1)) {
                     if (changed) {
-                        apply_nav_visuals();
-                        if (s_nav.mode == NAV_SCREEN &&
-                            s_nav.screen == NAV_SCREEN_CALCLOCK) {
-                            update_calendar_display(&now);
-                            update_clock_hands(now.tm_hour, now.tm_min, now.tm_sec);
-                            s_last_cal_day = now.tm_mday;
-                            s_last_cal_mon = now.tm_mon;
-                            s_last_cal_sec = now.tm_sec;
+                        if (s_nav.mode == NAV_DETAIL && s_nav.screen == NAV_SCREEN_CALCLOCK) {
+                            /* Month arrows act immediately and bounce back to
+                               FOCUS - see "Month browsing" in the design spec.
+                               nav.c has no notion of "act, don't open a view",
+                               so this reuses the same escape hatch Settings
+                               rows already rely on. */
+                            if (s_nav.focus == 0) {
+                                s_cal_disp_month--;
+                                if (s_cal_disp_month < 0) { s_cal_disp_month = 11; s_cal_disp_year--; }
+                            } else {
+                                s_cal_disp_month++;
+                                if (s_cal_disp_month > 11) { s_cal_disp_month = 0; s_cal_disp_year++; }
+                            }
+                            update_calendar_display(s_cal_disp_year, s_cal_disp_month, &now);
+                            s_nav.mode = NAV_FOCUS;
+                            apply_nav_visuals();
+                        } else {
+                            apply_nav_visuals();
+                            if (s_nav.mode == NAV_SCREEN &&
+                                s_nav.screen == NAV_SCREEN_CALCLOCK) {
+                                update_calendar_display(s_cal_disp_year, s_cal_disp_month, &now);
+                                update_clock_hands(now.tm_hour, now.tm_min, now.tm_sec);
+                                s_last_cal_day = now.tm_mday;
+                                s_last_cal_mon = now.tm_mon;
+                                s_last_cal_sec = now.tm_sec;
+                            }
                         }
                     }
                     hint_text_t h = hint_for_mode(&s_nav);
@@ -441,7 +491,7 @@ static void clock_task(void *arg)
                 /* the notice is static - nothing to redraw */
             } else if (s_nav.screen == NAV_SCREEN_CALCLOCK) {
                 if (now.tm_mday != s_last_cal_day || now.tm_mon != s_last_cal_mon) {
-                    update_calendar_display(&now);
+                    update_calendar_display(s_cal_disp_year, s_cal_disp_month, &now);
                     s_last_cal_day = now.tm_mday;
                     s_last_cal_mon = now.tm_mon;
                     dirty = true;
