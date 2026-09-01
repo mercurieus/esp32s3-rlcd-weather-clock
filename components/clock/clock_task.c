@@ -33,6 +33,7 @@ static WeatherDay s_weather[4];
    slot stays blank until then rather than showing a default cloud icon
    against a temperature that was never fetched. */
 static bool s_weather_valid = false;
+static WeatherNow s_weather_now = { .valid = false };
 static bool s_battery_warning_active = false;
 static bool s_colon_visible = true;
 static int s_last_cal_day = -1;
@@ -130,7 +131,7 @@ static void wifi_connected_cb(void *ctx)
 {
     WeatherDay *days = (WeatherDay *)ctx;
     set_status("Fetching weather forecast...");
-    if (Weather_Fetch(days)) {
+    if (Weather_Fetch(days, &s_weather_now)) {
         s_weather_valid = true;
         set_status("Weather updated.");
     } else {
@@ -143,7 +144,7 @@ static void update_labels(const struct tm *t, float temperature, float humidity,
 {
     if (Lvgl_lock(-1)) {
         char c[2] = { '0', '\0' };
-        char temp_buf[32], hum_buf[16], date_buf[40], out_buf[16], batt_buf[24];
+        char temp_buf[32], hum_buf[16], date_buf[40], out_buf[16];
 
         c[0] = (char)('0' + (t->tm_hour / 10) % 10);
         lv_label_set_text(objects.clock_hh1, c);
@@ -166,7 +167,6 @@ static void update_labels(const struct tm *t, float temperature, float humidity,
            apart without it. */
         snprintf(temp_buf, sizeof(temp_buf), "%s%d.%d°", temp_negative ? "-" : "", temp_whole, temp_frac);
         snprintf(hum_buf, sizeof(hum_buf), "%d%%", (int)(humidity + 0.5f));
-        snprintf(batt_buf, sizeof(batt_buf), "%d.%02d", battery_mv / 1000, (battery_mv % 1000) / 10);
 
         /* strftime's "%a %-d" is not portable in newlib - the "-" flag is a
            glibc extension - so the short date is assembled by hand. The
@@ -176,14 +176,21 @@ static void update_labels(const struct tm *t, float temperature, float humidity,
         snprintf(date_buf, sizeof(date_buf), "%s\n%d", WEEKDAY_NAMES[t->tm_wday], t->tm_mday);
         lv_label_set_text(objects.clock_date, date_buf);
 
+        /* Prefer the current conditions; fall back to today's forecast high
+           when the response carried no current_weather block, so the slot
+           still says something rather than going blank. */
         const lv_image_dsc_t *out_icon = NULL;
         out_buf[0] = '\0';
-        if (s_weather_valid) {
+        if (s_weather_now.valid) {
+            out_icon = weather_icon_src(classify_weathercode(s_weather_now.weathercode));
+            snprintf(out_buf, sizeof(out_buf), "%d°", s_weather_now.temp);
+        } else if (s_weather_valid) {
             out_icon = weather_icon_src(classify_weathercode(s_weather[0].weathercode));
             snprintf(out_buf, sizeof(out_buf), "%d°", s_weather[0].temp_max);
         }
 
-        Overlay_SetTopBar(temp_buf, hum_buf, out_icon, out_buf, batt_buf);
+        Overlay_SetTopBar(temp_buf, hum_buf, out_icon, out_buf,
+                          Battery_PercentFromMv(battery_mv));
 
         Lvgl_Refresh();
         Lvgl_unlock();

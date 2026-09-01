@@ -44,12 +44,13 @@ static int round_temp(double v)
     return (v >= 0.0) ? (int)(v + 0.5) : (int)(v - 0.5);
 }
 
-static bool weather_fetch_once(WeatherDay days_out[4])
+static bool weather_fetch_once(WeatherDay days_out[4], WeatherNow *now_out)
 {
     char url[256];
     snprintf(url, sizeof(url),
         "https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
         "&daily=weathercode,temperature_2m_max,temperature_2m_min"
+        "&current_weather=true"
         "&timezone=auto&forecast_days=4",
         WEATHER_LATITUDE, WEATHER_LONGITUDE);
 
@@ -79,6 +80,23 @@ static bool weather_fetch_once(WeatherDay days_out[4])
     if (!root) {
         ESP_LOGW(TAG, "Failed to parse weather JSON");
         return false;
+    }
+
+    /* Current conditions are optional: a response missing them is still a
+       usable forecast, so this is parsed before the daily block is validated
+       and never fails the fetch. */
+    if (now_out) {
+        now_out->valid = false;
+        cJSON *cur = cJSON_GetObjectItem(root, "current_weather");
+        cJSON *cur_temp = cur ? cJSON_GetObjectItem(cur, "temperature") : NULL;
+        cJSON *cur_code = cur ? cJSON_GetObjectItem(cur, "weathercode") : NULL;
+        if (cJSON_IsNumber(cur_temp) && cJSON_IsNumber(cur_code)) {
+            now_out->temp        = round_temp(cur_temp->valuedouble);
+            now_out->weathercode = cur_code->valueint;
+            now_out->valid       = true;
+        } else {
+            ESP_LOGW(TAG, "Response carried no current_weather block");
+        }
     }
 
     cJSON *daily = cJSON_GetObjectItem(root, "daily");
@@ -113,12 +131,16 @@ static bool weather_fetch_once(WeatherDay days_out[4])
     return count >= 4;
 }
 
-bool Weather_Fetch(WeatherDay days_out[4])
+bool Weather_Fetch(WeatherDay days_out[4], WeatherNow *now_out)
 {
     const int max_attempts = 2;
 
+    if (now_out) {
+        now_out->valid = false;
+    }
+
     for (int attempt = 1; attempt <= max_attempts; attempt++) {
-        if (weather_fetch_once(days_out)) {
+        if (weather_fetch_once(days_out, now_out)) {
             return true;
         }
         if (attempt < max_attempts) {
