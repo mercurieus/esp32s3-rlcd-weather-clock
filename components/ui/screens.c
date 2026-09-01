@@ -96,32 +96,39 @@ void create_screen_main() {
                uncompressed, 23x102 at bitmap_index 51520): the ink rows are
                0..21 and 80..101, so with the glyph box starting at y68 the
                upper dot is y68..89, the lower dot y148..169, and the gap
-               between them is y90..147 - 58px tall. montserrat_14's
-               line_height is 16, so geometric centring would give y111; the
-               date reads as glued to the lower dot there, so it is lifted to
-               y106. The glyph ink sits high in the line box (base_line 3), so
-               the optical centre is above the geometric one.
+               between them is y90..147 - 58px tall.
 
-               Sizing is set by the WIDEST date, not a sample one: "We 24" is
-               45px at montserrat_14 (52px at 16pt, and the three-letter form
-               is 55px / 63px - all three overflow). The hard limit is the
+               Stacking the weekday over the day number trades the horizontal
+               problem for a vertical one, and the vertical budget is the
+               looser of the two. Set on one line the date was fighting the
                neighbouring digits: the widest glyph in
                ui_font_saira_condensed_bold200 ('8', adv_w 1574, box_w 84)
-               overflows its own 90px column, leaving ink free only from about
-               x172 to x221 - a 49px channel. So: two-letter weekday,
-               montserrat_14, 48px box. The box is centred at x198 rather than
-               on the dots' own centre (x199.5); giving up 1.5px of symmetry
-               nobody can see keeps the worst case clear of the digits. */
+               overflows its own 90px column and leaves ink free only from
+               about x172 to x221, a 49px channel, while the widest date
+               ("We 24") is 45px at montserrat_14 and 52px at 16pt. Split over
+               two lines the widest line is just "24", so the font can go back
+               up to 16pt and still clear the digits with room to spare.
+
+               Two montserrat_16 lines are 2 x 18 = 36px (line_space defaults
+               to 0), leaving 11px above and below inside the 58px gap.
+
+               y is measured, not centred: geometric centring put the single
+               line at y111 and it read as glued to the lower dot, with y106
+               looking right on hardware - so the optical centre of the gap is
+               about y114, not the y118 the arithmetic gives. A 36px block
+               centred on y114 starts at y96. The box stays 48px wide centred
+               at x198 so the two lines centre on the same axis the one-line
+               version used. */
             lv_obj_t *obj = lv_label_create(parent_obj);
             objects.clock_date = obj;
-            lv_obj_set_pos(obj, 174, 106);
+            lv_obj_set_pos(obj, 174, 96);
             lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-            lv_obj_set_style_text_font(obj, &lv_font_montserrat_14, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_text_font(obj, &lv_font_montserrat_16, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_min_width(obj, 48, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_max_width(obj, 48, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_text_align(obj, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_text_color(obj, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_label_set_text_static(obj, "We 24");
+            lv_label_set_text_static(obj, "We\n24");
         }
         {
             lv_obj_t *obj = lv_line_create(parent_obj);
