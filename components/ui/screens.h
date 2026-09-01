@@ -30,6 +30,7 @@ typedef struct _objects_t {
     lv_obj_t *info;
     lv_obj_t *clock_hh1;
     lv_obj_t *obj2;
+    lv_obj_t *clock_date;
     lv_obj_t *obj4;
     lv_obj_t *clock_hh2;
     lv_obj_t *clock_mm1;
