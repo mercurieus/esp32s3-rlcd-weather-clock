@@ -120,13 +120,17 @@ void create_screen_main() {
                little room left to tune: the block can only travel y90..y111
                before it touches a dot.
 
-               Horizontally the box is centred at x203. Stacking made this
-               cheap - the widest line is now just "24" at about 18px, so the
-               49px channel between the digits is no longer the constraint it
-               was on one line. */
+               Horizontally the box is centred on the dots' own ink: the ':'
+               glyph is 23px wide starting at x188, so its centre is x199.5,
+               and a 48px box at x176 centres on x200. Stacking made this
+               sensitive - the ink is only ~18px wide sitting directly under a
+               23px dot, so an offset reads as a misalignment against the dot
+               rather than against the column. It also made it cheap: the
+               widest line is now just "24", so the 49px channel between the
+               digits no longer binds the way it did on one line. */
             lv_obj_t *obj = lv_label_create(parent_obj);
             objects.clock_date = obj;
-            lv_obj_set_pos(obj, 179, 101);
+            lv_obj_set_pos(obj, 176, 101);
             lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
             lv_obj_set_style_text_font(obj, &lv_font_montserrat_16, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_min_width(obj, 48, LV_PART_MAIN | LV_STATE_DEFAULT);
