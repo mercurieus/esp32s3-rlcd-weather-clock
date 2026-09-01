@@ -144,7 +144,7 @@ static void update_labels(const struct tm *t, float temperature, float humidity,
 {
     if (Lvgl_lock(-1)) {
         char c[2] = { '0', '\0' };
-        char temp_buf[32], hum_buf[16], date_buf[40], out_buf[16];
+        char temp_buf[32], hum_buf[16], date_buf[40], out_buf[16], batt_buf[16];
 
         c[0] = (char)('0' + (t->tm_hour / 10) % 10);
         lv_label_set_text(objects.clock_hh1, c);
@@ -167,6 +167,7 @@ static void update_labels(const struct tm *t, float temperature, float humidity,
            apart without it. */
         snprintf(temp_buf, sizeof(temp_buf), "%s%d.%d°", temp_negative ? "-" : "", temp_whole, temp_frac);
         snprintf(hum_buf, sizeof(hum_buf), "%d%%", (int)(humidity + 0.5f));
+        snprintf(batt_buf, sizeof(batt_buf), "%d.%02d", battery_mv / 1000, (battery_mv % 1000) / 10);
 
         /* strftime's "%a %-d" is not portable in newlib - the "-" flag is a
            glibc extension - so the short date is assembled by hand. The
@@ -190,7 +191,7 @@ static void update_labels(const struct tm *t, float temperature, float humidity,
         }
 
         Overlay_SetTopBar(temp_buf, hum_buf, out_icon, out_buf,
-                          Battery_PercentFromMv(battery_mv));
+                          batt_buf, Battery_PercentFromMv(battery_mv));
 
         Lvgl_Refresh();
         Lvgl_unlock();
