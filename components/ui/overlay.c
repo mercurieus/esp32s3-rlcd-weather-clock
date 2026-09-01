@@ -13,13 +13,21 @@ static lv_obj_t *s_hum_trend;
 static lv_obj_t *s_weather_icon;
 static lv_obj_t *s_outdoor;
 static lv_obj_t *s_sync;
-static lv_obj_t *s_battery;
+static lv_obj_t *s_battery_fill;
 static lv_obj_t *s_focus;
 static lv_obj_t *s_hint_box;
 static lv_obj_t *s_hint_key_label;
 static lv_obj_t *s_hint_boot_label;
 static uint32_t  s_hint_until_ms;
 static bool      s_hint_visible;
+
+/* The battery gauge's inner well, inside the frame at (330,1,58,27): the
+   2px border leaves x332..385, and a further 2px inset keeps the fill clear
+   of it. */
+#define BATT_FILL_X 334
+#define BATT_FILL_Y 5
+#define BATT_FILL_W 50
+#define BATT_FILL_H 19
 
 #define RAIL_BUF_SIZE LV_CANVAS_BUF_SIZE(400, 34, 16, LV_DRAW_BUF_STRIDE_ALIGN)
 static uint8_t *s_rail_buf = NULL;
@@ -200,7 +208,22 @@ void Overlay_Create(void)
        with the rest of the row. */
     overlay_frame(top, 330, 1, 58, 27);        /* battery body - hollow outline */
     overlay_frame(top, 388, 6, 6, 17);         /* nub */
-    s_battery = overlay_label(top, 333, RAIL_TEXT_Y, 52, LV_TEXT_ALIGN_CENTER, "0.00");
+    /* Kindle-style: the box is a fuel gauge, not a number. Solid black
+       rather than dithered - a stipple would read as a partial charge at a
+       glance, and the whole point of the glyph is that its fill level is the
+       reading. The frame's 2px border leaves x332..385 inside; insetting two
+       more pixels gives a 50x19 well at x334,y5 so the fill never touches the
+       frame and a full battery still reads as a fill rather than a solid
+       block. */
+    s_battery_fill = lv_obj_create(top);
+    lv_obj_remove_flag(s_battery_fill, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_pos(s_battery_fill, BATT_FILL_X, BATT_FILL_Y);
+    lv_obj_set_size(s_battery_fill, 0, BATT_FILL_H);
+    lv_obj_set_style_pad_all(s_battery_fill, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(s_battery_fill, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(s_battery_fill, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(s_battery_fill, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(s_battery_fill, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     /* Focus frame. 3 px so it survives the 1 bit threshold, and hidden
        until a focusable element is selected. */
@@ -255,14 +278,22 @@ void Overlay_Create(void)
 
 void Overlay_SetTopBar(const char *temp, const char *hum,
                        const lv_image_dsc_t *weather_icon, const char *outdoor,
-                       const char *battery)
+                       int battery_pct)
 {
     if (!s_temp) {
         return;
     }
     lv_label_set_text(s_temp, temp);
     lv_label_set_text(s_hum, hum);
-    lv_label_set_text(s_battery, battery);
+    /* Round to the nearest pixel, but never round a battery that still has
+       charge down to an empty-looking gauge. */
+    if (battery_pct < 0)   battery_pct = 0;
+    if (battery_pct > 100) battery_pct = 100;
+    int fill_w = (BATT_FILL_W * battery_pct + 50) / 100;
+    if (fill_w == 0 && battery_pct > 0) {
+        fill_w = 1;
+    }
+    lv_obj_set_width(s_battery_fill, fill_w);
 
     /* Before the first successful fetch there is no forecast to show, and
        a stale icon would be worse than an empty slot - hide both halves of

@@ -81,6 +81,11 @@ static int voltage_to_percent(int mv)
     return 0;
 }
 
+int Battery_PercentFromMv(int millivolts)
+{
+    return voltage_to_percent(millivolts);
+}
+
 esp_err_t Battery_ReadPercent(int *percent_out)
 {
     int battery_mv;
