@@ -3,11 +3,16 @@
 #include "esp_heap_caps.h"
 
 #include "fonts.h"
+#include "images.h"
 #include "dither.h"
 
 static lv_obj_t *s_temp;
+static lv_obj_t *s_temp_trend;
 static lv_obj_t *s_hum;
-static lv_obj_t *s_date;
+static lv_obj_t *s_hum_trend;
+static lv_obj_t *s_weather_icon;
+static lv_obj_t *s_outdoor;
+static lv_obj_t *s_sync;
 static lv_obj_t *s_battery;
 static lv_obj_t *s_focus;
 static lv_obj_t *s_hint_box;
@@ -36,7 +41,7 @@ static void canvas_dither_fill(lv_obj_t *canvas, int canvas_x, int canvas_y,
     }
 }
 
-/* The four readings ride directly on this rail (no plaques), so the band
+/* The readings ride directly on this rail (no plaques), so the band
    under them must stay legibly light - a sparse Bayer stipple, mostly
    white. A gentle gradient (a brighter ridge about a third of the way
    down, a touch darker toward the band edges) keeps it reading as brushed
@@ -140,20 +145,59 @@ void Overlay_Create(void)
     lv_obj_set_pos(band, 0, 0);
     lv_obj_set_size(band, 400, 34);
 
-    /* Kindle-style: the four readings ride straight on the metal rail, no
+    /* Kindle-style: the readings ride straight on the metal rail, no
        plaques. rail_grey keeps the text band a light, sparse stipple so
-       20pt black text stays legible on it. Label x positions leave room
-       for each reading's widest value at montserrat_20 ("-88.8" / "100%" /
-       "01.01.2000" / "4.20"). All four share one y so they read as a
-       single row, sitting high enough to clear the dark lip at y29/30. */
+       20pt black text stays legible on it. Five slots, each wide enough
+       for its widest possible value measured off montserrat_20's real
+       adv_w table, so nothing can ever collide as values change:
+
+         1 indoor    x6    w80   "-88.8" plus a trend arrow
+         2 humidity  x106  w71   "100%" plus a trend arrow
+         3 weather   x197  w68   24px forecast icon plus "-25"
+         4 sync      x285  w25   one symbol glyph
+         5 battery   x330  w64   boxed reading plus nub
+
+       Two of the five are reserved placeholders that nothing writes to
+       yet - the trend arrows and the sync glyph. They are created here
+       anyway so the slot budget is fixed now and the row cannot shift
+       around later when the data behind them lands.
+
+       Every reading shares one y so they read as a single row, sitting
+       high enough to clear the dark lip at y29/30. */
     #define RAIL_TEXT_Y 3
-    s_temp    = overlay_label(top, 3,   RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "0.0");
-    s_hum     = overlay_label(top, 67,  RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "0%");
-    s_date    = overlay_label(top, 135, RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "01.01.2000");
+    s_temp       = overlay_label(top, 6,   RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "0.0°");
+    /* Placeholder: sized and positioned for the rising/falling arrow, but
+       nothing sets it yet - there is no temperature history to trend on. */
+    s_temp_trend = overlay_label(top, 68,  RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "");
+    s_hum        = overlay_label(top, 106, RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "0%");
+    /* Placeholder, same reasoning as the temperature arrow above. */
+    s_hum_trend  = overlay_label(top, 159, RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "");
+
+    /* Outdoor forecast: the source icons are 90x90, so a 68/256 scale
+       lands on ~24px. lv_image_set_scale zooms about the object's centre
+       and leaves the layout box at the source size, so the box is pinned
+       to 24x24 and the inner alignment set to CENTER - that keeps the
+       scaled result inside the 24px slot at x197 instead of spilling 33px
+       either side of it. Hidden until the first forecast arrives. */
+    s_weather_icon = lv_image_create(top);
+    lv_obj_set_pos(s_weather_icon, 197, 5);
+    lv_obj_set_size(s_weather_icon, 24, 24);
+    lv_image_set_src(s_weather_icon, &img_icon_cloud);
+    lv_image_set_inner_align(s_weather_icon, LV_IMAGE_ALIGN_CENTER);
+    lv_image_set_scale(s_weather_icon, 68);
+    lv_obj_add_flag(s_weather_icon, LV_OBJ_FLAG_HIDDEN);
+
+    s_outdoor = overlay_label(top, 225, RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "");
+
+    /* Placeholder: reserved for WiFi/internet status, which needs a
+       last-sync-OK flag that does not exist yet. LV_SYMBOL_WIFI measures
+       25px at montserrat_20, which is exactly what this slot is sized for,
+       so dropping the glyph in later moves nothing else. */
+    s_sync = overlay_label(top, 285, RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "");
 
     /* Battery: a hollow outlined box (default transparent bg), vertically
        centred on the battery label's line box so its number reads level
-       with the other three. */
+       with the rest of the row. */
     overlay_frame(top, 330, 1, 58, 27);        /* battery body - hollow outline */
     overlay_frame(top, 388, 6, 6, 17);         /* nub */
     s_battery = overlay_label(top, 333, RAIL_TEXT_Y, 52, LV_TEXT_ALIGN_CENTER, "0.00");
@@ -210,15 +254,27 @@ void Overlay_Create(void)
 }
 
 void Overlay_SetTopBar(const char *temp, const char *hum,
-                      const char *date, const char *battery)
+                       const lv_image_dsc_t *weather_icon, const char *outdoor,
+                       const char *battery)
 {
     if (!s_temp) {
         return;
     }
     lv_label_set_text(s_temp, temp);
     lv_label_set_text(s_hum, hum);
-    lv_label_set_text(s_date, date);
     lv_label_set_text(s_battery, battery);
+
+    /* Before the first successful fetch there is no forecast to show, and
+       a stale icon would be worse than an empty slot - hide both halves of
+       the weather slot rather than leaving last boot's cloud sitting there. */
+    if (weather_icon == NULL) {
+        lv_obj_add_flag(s_weather_icon, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(s_outdoor, "");
+    } else {
+        lv_image_set_src(s_weather_icon, weather_icon);
+        lv_obj_remove_flag(s_weather_icon, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(s_outdoor, outdoor);
+    }
 }
 
 void Overlay_ShowFocus(const lv_area_t *area)

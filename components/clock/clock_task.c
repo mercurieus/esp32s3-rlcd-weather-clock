@@ -29,6 +29,10 @@
 static const char *TAG = "ClockTask";
 static const char *WEEKDAY_NAMES[7] = { "Su", "Mo", "Tu", "We", "Th", "Fr", "Sa" };
 static WeatherDay s_weather[4];
+/* Cleared until the first Weather_Fetch succeeds. The top bar's forecast
+   slot stays blank until then rather than showing a default cloud icon
+   against a temperature that was never fetched. */
+static bool s_weather_valid = false;
 static bool s_battery_warning_active = false;
 static bool s_colon_visible = true;
 static int s_last_cal_day = -1;
@@ -127,6 +131,7 @@ static void wifi_connected_cb(void *ctx)
     WeatherDay *days = (WeatherDay *)ctx;
     set_status("Fetching weather forecast...");
     if (Weather_Fetch(days)) {
+        s_weather_valid = true;
         set_status("Weather updated.");
     } else {
         set_status("Failed to fetch weather.");
@@ -137,8 +142,14 @@ static void wifi_connected_cb(void *ctx)
 static void update_labels(const struct tm *t, float temperature, float humidity, int battery_mv)
 {
     if (Lvgl_lock(-1)) {
+        /* WEEKDAY_NAMES holds the two-letter forms the narrow forecast rows
+           need; the clock face has room for three and reads better with
+           them, so it gets its own table. Both are Sunday-first, matching
+           tm_wday. */
+        static const char *TM_WDAY_NAMES[7] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+
         char c[2] = { '0', '\0' };
-        char temp_buf[32], hum_buf[16], date_buf[40], batt_buf[24];
+        char temp_buf[32], hum_buf[16], date_buf[40], out_buf[16], batt_buf[24];
 
         c[0] = (char)('0' + (t->tm_hour / 10) % 10);
         lv_label_set_text(objects.clock_hh1, c);
@@ -155,12 +166,27 @@ static void update_labels(const struct tm *t, float temperature, float humidity,
         int temp_frac = (int)((temp_abs - temp_whole) * 10.0f + 0.5f);
         if (temp_frac >= 10) { temp_frac = 0; temp_whole += 1; }
 
-        snprintf(temp_buf, sizeof(temp_buf), "%s%d.%d°C", temp_negative ? "-" : "", temp_whole, temp_frac);
+        /* The indoor reading drops the "C": that unit costs 15px at
+           montserrat_20, which the trend arrow now needs, and the "%" on the
+           humidity slot immediately to its right is enough to tell the two
+           apart without it. */
+        snprintf(temp_buf, sizeof(temp_buf), "%s%d.%d°", temp_negative ? "-" : "", temp_whole, temp_frac);
         snprintf(hum_buf, sizeof(hum_buf), "%d%%", (int)(humidity + 0.5f));
-        snprintf(date_buf, sizeof(date_buf), "%02d.%02d.%04d", t->tm_mday, t->tm_mon + 1, t->tm_year + 1900);
         snprintf(batt_buf, sizeof(batt_buf), "%d.%02d", battery_mv / 1000, (battery_mv % 1000) / 10);
 
-        Overlay_SetTopBar(temp_buf, hum_buf, date_buf, batt_buf);
+        /* strftime's "%a %-d" is not portable in newlib - the "-" flag is a
+           glibc extension - so the short date is assembled by hand. */
+        snprintf(date_buf, sizeof(date_buf), "%s %d", TM_WDAY_NAMES[t->tm_wday], t->tm_mday);
+        lv_label_set_text(objects.clock_date, date_buf);
+
+        const lv_image_dsc_t *out_icon = NULL;
+        out_buf[0] = '\0';
+        if (s_weather_valid) {
+            out_icon = weather_icon_src(classify_weathercode(s_weather[0].weathercode));
+            snprintf(out_buf, sizeof(out_buf), "%d°", s_weather[0].temp_max);
+        }
+
+        Overlay_SetTopBar(temp_buf, hum_buf, out_icon, out_buf, batt_buf);
 
         Lvgl_Refresh();
         Lvgl_unlock();

@@ -12,9 +12,12 @@ extern "C" {
    screen is loaded. Call once, after create_screens(). */
 void Overlay_Create(void);
 
-/* Updates the top bar. Strings are copied. */
+/* Updates the top bar's live readings. Strings are copied.
+   weather_icon may be NULL (no forecast yet), in which case the icon is
+   hidden and the outdoor reading blanked. */
 void Overlay_SetTopBar(const char *temp, const char *hum,
-                      const char *date, const char *battery);
+                       const lv_image_dsc_t *weather_icon, const char *outdoor,
+                       const char *battery);
 
 /* Draws the focus frame around an absolute screen rectangle.
    Pass NULL to hide it. */

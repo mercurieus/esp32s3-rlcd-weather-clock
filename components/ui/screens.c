@@ -85,6 +85,24 @@ void create_screen_main() {
             lv_label_set_text_static(obj, ":");
         }
         {
+            // clock_date
+            /* The date moved off the shared top bar and onto the face, in
+               the only gap the big digits leave: the colon column, x175..218,
+               43px wide. montserrat_16 is load-bearing here - "Fri 21"
+               measures 40px at 16pt but 51px at 20pt, so a larger font would
+               spill straight into the hour and minute groups. */
+            lv_obj_t *obj = lv_label_create(parent_obj);
+            objects.clock_date = obj;
+            lv_obj_set_pos(obj, 175, 159);
+            lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+            lv_obj_set_style_text_font(obj, &lv_font_montserrat_16, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_min_width(obj, 43, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_max_width(obj, 43, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_text_align(obj, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_text_color(obj, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_label_set_text_static(obj, "Fri 21");
+        }
+        {
             lv_obj_t *obj = lv_line_create(parent_obj);
             objects.obj4 = obj;
             lv_obj_set_pos(obj, 0, 187);
