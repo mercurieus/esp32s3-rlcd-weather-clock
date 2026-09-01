@@ -142,12 +142,6 @@ static void wifi_connected_cb(void *ctx)
 static void update_labels(const struct tm *t, float temperature, float humidity, int battery_mv)
 {
     if (Lvgl_lock(-1)) {
-        /* WEEKDAY_NAMES holds the two-letter forms the narrow forecast rows
-           need; the clock face has room for three and reads better with
-           them, so it gets its own table. Both are Sunday-first, matching
-           tm_wday. */
-        static const char *TM_WDAY_NAMES[7] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
-
         char c[2] = { '0', '\0' };
         char temp_buf[32], hum_buf[16], date_buf[40], out_buf[16], batt_buf[24];
 
@@ -176,7 +170,7 @@ static void update_labels(const struct tm *t, float temperature, float humidity,
 
         /* strftime's "%a %-d" is not portable in newlib - the "-" flag is a
            glibc extension - so the short date is assembled by hand. */
-        snprintf(date_buf, sizeof(date_buf), "%s %d", TM_WDAY_NAMES[t->tm_wday], t->tm_mday);
+        snprintf(date_buf, sizeof(date_buf), "%s %d", WEEKDAY_NAMES[t->tm_wday], t->tm_mday);
         lv_label_set_text(objects.clock_date, date_buf);
 
         const lv_image_dsc_t *out_icon = NULL;
