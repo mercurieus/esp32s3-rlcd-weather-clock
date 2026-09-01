@@ -86,14 +86,30 @@ void create_screen_main() {
         }
         {
             // clock_date
-            /* The date moved off the shared top bar and onto the face, in
-               the only gap the big digits leave: the colon column, x175..218,
-               43px wide. montserrat_16 is load-bearing here - "Fri 21"
-               measures 40px at 16pt but 51px at 20pt, so a larger font would
-               spill straight into the hour and minute groups. */
+            /* The date moved off the shared top bar and onto the face, into
+               the one hole the big digits leave: the colon column. The ':'
+               advance box is x175..218, 43px wide, and the date sits between
+               the colon's two dots, not below them - below would have run
+               into the horizontal rule at y187 and overlapped the lower dot,
+               which blinks every second.
+
+               Decoded from ui_font_saira200's glyph bitmap for ':' (4bpp,
+               uncompressed, 23x102 at bitmap_index 51520): the ink rows are
+               0..21 and 80..101, so with the glyph box starting at y68 the
+               upper dot is y68..89, the lower dot y148..169, and the gap
+               between them is y90..147 - 58px tall. montserrat_16's
+               line_height is 18, so centring gives 90 + (58 - 18) / 2 = 110,
+               clearing each dot by 20px.
+
+               montserrat_16 is load-bearing horizontally too: "Fri 21"
+               measures 41px at 16pt but 51px at 20pt, and the column is 43px.
+               The neighbouring digits are the real limit - the widest glyph in
+               ui_font_saira_condensed_bold200 ('8', adv_w 1574, box_w 84)
+               leaves ink free only from about x172 to x221, so the column has
+               roughly 3px of slack on each side and no more. */
             lv_obj_t *obj = lv_label_create(parent_obj);
             objects.clock_date = obj;
-            lv_obj_set_pos(obj, 175, 159);
+            lv_obj_set_pos(obj, 175, 110);
             lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
             lv_obj_set_style_text_font(obj, &lv_font_montserrat_16, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_min_width(obj, 43, LV_PART_MAIN | LV_STATE_DEFAULT);
