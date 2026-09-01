@@ -13,6 +13,7 @@ static lv_obj_t *s_hum_trend;
 static lv_obj_t *s_weather_icon;
 static lv_obj_t *s_outdoor;
 static lv_obj_t *s_sync;
+static lv_obj_t *s_battery_volts;
 static lv_obj_t *s_battery_fill;
 static lv_obj_t *s_focus;
 static lv_obj_t *s_hint_box;
@@ -21,13 +22,15 @@ static lv_obj_t *s_hint_boot_label;
 static uint32_t  s_hint_until_ms;
 static bool      s_hint_visible;
 
-/* The battery gauge's inner well, inside the frame at (330,1,58,27): the
-   2px border leaves x332..385, and a further 2px inset keeps the fill clear
-   of it. */
-#define BATT_FILL_X 334
-#define BATT_FILL_Y 5
-#define BATT_FILL_W 50
-#define BATT_FILL_H 19
+/* The battery slot is a voltage reading with a small gauge beside it. The
+   gauge shrank to 28x20 once it stopped being the only thing in the slot -
+   it is a glanceable level, and the number carries the precision. Body
+   x362..389 with a 2px border, so the fill well is x364..387 / y7..22; one
+   more pixel of inset keeps the fill clear of the frame. */
+#define BATT_FILL_X 365
+#define BATT_FILL_Y 8
+#define BATT_FILL_W 22
+#define BATT_FILL_H 14
 
 #define RAIL_BUF_SIZE LV_CANVAS_BUF_SIZE(400, 34, 16, LV_DRAW_BUF_STRIDE_ALIGN)
 static uint8_t *s_rail_buf = NULL;
@@ -203,18 +206,25 @@ void Overlay_Create(void)
        so dropping the glyph in later moves nothing else. */
     s_sync = overlay_label(top, 285, RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "");
 
-    /* Battery: a hollow outlined box (default transparent bg), vertically
-       centred on the battery label's line box so its number reads level
-       with the rest of the row. */
-    overlay_frame(top, 330, 1, 58, 27);        /* battery body - hollow outline */
-    overlay_frame(top, 388, 6, 6, 17);         /* nub */
+    /* Battery: the voltage, then a small hollow gauge and its nub. The
+       reading is montserrat_16 rather than the row's 20pt - it is the least
+       urgent number on the bar, and the smaller size buys the room the gauge
+       needs beside it. Its y is set so it shares the 20pt row's baseline:
+       that row sits at RAIL_TEXT_Y with line_height 22 and base_line 4, so
+       the baseline is y21, and montserrat_16 (line_height 18, base_line 3)
+       meets it at y6. The widest reading is 36px, so the 38px box never
+       clips. */
+    s_battery_volts = overlay_label(top, 320, 6, 38, LV_TEXT_ALIGN_RIGHT, "0.00");
+    lv_obj_set_style_text_font(s_battery_volts, &lv_font_montserrat_16,
+                               LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    overlay_frame(top, 362, 5, 28, 20);        /* gauge body - hollow outline */
+    overlay_frame(top, 390, 10, 5, 10);        /* nub */
+
     /* Kindle-style: the box is a fuel gauge, not a number. Solid black
        rather than dithered - a stipple would read as a partial charge at a
        glance, and the whole point of the glyph is that its fill level is the
-       reading. The frame's 2px border leaves x332..385 inside; insetting two
-       more pixels gives a 50x19 well at x334,y5 so the fill never touches the
-       frame and a full battery still reads as a fill rather than a solid
-       block. */
+       reading. */
     s_battery_fill = lv_obj_create(top);
     lv_obj_remove_flag(s_battery_fill, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_pos(s_battery_fill, BATT_FILL_X, BATT_FILL_Y);
@@ -278,13 +288,15 @@ void Overlay_Create(void)
 
 void Overlay_SetTopBar(const char *temp, const char *hum,
                        const lv_image_dsc_t *weather_icon, const char *outdoor,
-                       int battery_pct)
+                       const char *battery_volts, int battery_pct)
 {
     if (!s_temp) {
         return;
     }
     lv_label_set_text(s_temp, temp);
     lv_label_set_text(s_hum, hum);
+    lv_label_set_text(s_battery_volts, battery_volts);
+
     /* Round to the nearest pixel, but never round a battery that still has
        charge down to an empty-looking gauge. */
     if (battery_pct < 0)   battery_pct = 0;
