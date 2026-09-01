@@ -112,16 +112,21 @@ void create_screen_main() {
                Two montserrat_16 lines are 2 x 18 = 36px (line_space defaults
                to 0), leaving 11px above and below inside the 58px gap.
 
-               y is measured, not centred: geometric centring put the single
-               line at y111 and it read as glued to the lower dot, with y106
-               looking right on hardware - so the optical centre of the gap is
-               about y114, not the y118 the arithmetic gives. A 36px block
-               centred on y114 starts at y96. The box stays 48px wide centred
-               at x198 so the two lines centre on the same axis the one-line
-               version used. */
+               The one-line version wanted lifting off the lower dot, but a
+               36px block behaves differently: matching that same optical
+               centre left only 6px above the block and 15px below, which read
+               as sitting high. Stacked, plain geometric centring is right -
+               90 + (58 - 36) / 2 = y101, 11px clear each side. There is very
+               little room left to tune: the block can only travel y90..y111
+               before it touches a dot.
+
+               Horizontally the box is centred at x203. Stacking made this
+               cheap - the widest line is now just "24" at about 18px, so the
+               49px channel between the digits is no longer the constraint it
+               was on one line. */
             lv_obj_t *obj = lv_label_create(parent_obj);
             objects.clock_date = obj;
-            lv_obj_set_pos(obj, 174, 96);
+            lv_obj_set_pos(obj, 179, 101);
             lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
             lv_obj_set_style_text_font(obj, &lv_font_montserrat_16, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_min_width(obj, 48, LV_PART_MAIN | LV_STATE_DEFAULT);
