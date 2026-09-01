@@ -169,8 +169,11 @@ static void update_labels(const struct tm *t, float temperature, float humidity,
         snprintf(batt_buf, sizeof(batt_buf), "%d.%02d", battery_mv / 1000, (battery_mv % 1000) / 10);
 
         /* strftime's "%a %-d" is not portable in newlib - the "-" flag is a
-           glibc extension - so the short date is assembled by hand. */
-        snprintf(date_buf, sizeof(date_buf), "%s %d", WEEKDAY_NAMES[t->tm_wday], t->tm_mday);
+           glibc extension - so the short date is assembled by hand. The
+           newline is load-bearing: the face date is stacked, weekday over
+           day number, because the colon column is far tighter horizontally
+           than vertically. */
+        snprintf(date_buf, sizeof(date_buf), "%s\n%d", WEEKDAY_NAMES[t->tm_wday], t->tm_mday);
         lv_label_set_text(objects.clock_date, date_buf);
 
         const lv_image_dsc_t *out_icon = NULL;
