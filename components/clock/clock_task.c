@@ -30,6 +30,9 @@
 #define SYNC_HOUR_1 5
 #define SYNC_HOUR_2 15
 #define WEATHER_REFRESH_MIN 30
+/* Three missed refresh cycles before the reading is called stale - one
+   failure is a blip, three in a row is an outage worth showing. */
+#define WEATHER_STALE_US ((int64_t)WEATHER_REFRESH_MIN * 3 * 60 * 1000000LL)
 #define BATTERY_WARNING_MV  3200
 #define BATTERY_CRITICAL_MV 3100
 static const char *TAG = "ClockTask";
@@ -40,6 +43,10 @@ static WeatherDay s_weather[4];
    against a temperature that was never fetched. */
 static bool s_weather_valid = false;
 static WeatherNow s_weather_now = { .valid = false };
+/* esp_timer keeps running across light sleep, so this stays honest through
+   the sleep loop. Negative until the first successful fetch, which reads as
+   stale - the bar should not claim fresh data it has never had. */
+static int64_t s_last_fetch_us = -1;
 static bool s_battery_warning_active = false;
 static bool s_colon_visible = true;
 static int s_last_cal_day = -1;
@@ -139,6 +146,7 @@ static void wifi_connected_cb(void *ctx)
     set_status("Fetching weather forecast...");
     if (Weather_Fetch(days, &s_weather_now)) {
         s_weather_valid = true;
+        s_last_fetch_us = esp_timer_get_time();
         set_status("Weather updated.");
     } else {
         set_status("Failed to fetch weather.");
@@ -196,7 +204,11 @@ static void update_labels(const struct tm *t, float temperature, float humidity,
             snprintf(out_buf, sizeof(out_buf), "%d°", s_weather[0].temp_max);
         }
 
-        Overlay_SetTopBar(temp_buf, hum_buf, out_icon, out_buf,
+        const bool data_stale =
+            (s_last_fetch_us < 0) ||
+            (esp_timer_get_time() - s_last_fetch_us > WEATHER_STALE_US);
+
+        Overlay_SetTopBar(temp_buf, hum_buf, out_icon, out_buf, data_stale,
                           batt_buf, Battery_PercentFromMv(battery_mv));
 
         Lvgl_Refresh();

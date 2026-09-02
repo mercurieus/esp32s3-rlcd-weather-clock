@@ -200,10 +200,12 @@ void Overlay_Create(void)
 
     s_outdoor = overlay_label(top, 225, RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "");
 
-    /* Placeholder: reserved for WiFi/internet status, which needs a
-       last-sync-OK flag that does not exist yet. LV_SYMBOL_WIFI measures
-       25px at montserrat_20, which is exactly what this slot is sized for,
-       so dropping the glyph in later moves nothing else. */
+    /* Sync status. The useful signal on this device is not link state -
+       WiFi is down almost all the time by design - but whether the data on
+       screen is still worth believing. So: nothing at all while the last
+       fetch is recent, and a warning glyph once it has gone stale. An
+       always-present "connected" icon would be noise; an absent one is the
+       quiet default, which is what a status indicator should be. */
     s_sync = overlay_label(top, 285, RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "");
 
     /* Battery: the voltage, then a small hollow gauge and its nub. The
@@ -288,6 +290,7 @@ void Overlay_Create(void)
 
 void Overlay_SetTopBar(const char *temp, const char *hum,
                        const lv_image_dsc_t *weather_icon, const char *outdoor,
+                       bool data_stale,
                        const char *battery_volts, int battery_pct)
 {
     if (!s_temp) {
@@ -295,6 +298,7 @@ void Overlay_SetTopBar(const char *temp, const char *hum,
     }
     lv_label_set_text(s_temp, temp);
     lv_label_set_text(s_hum, hum);
+    lv_label_set_text(s_sync, data_stale ? LV_SYMBOL_WARNING : "");
     lv_label_set_text(s_battery_volts, battery_volts);
 
     /* Round to the nearest pixel, but never round a battery that still has
