@@ -17,6 +17,7 @@ void Overlay_Create(void);
    hidden and the outdoor reading blanked. */
 void Overlay_SetTopBar(const char *temp, const char *hum,
                        const lv_image_dsc_t *weather_icon, const char *outdoor,
+                       bool data_stale,
                        const char *battery_volts, int battery_pct);
 
 /* Draws the focus frame around an absolute screen rectangle.
