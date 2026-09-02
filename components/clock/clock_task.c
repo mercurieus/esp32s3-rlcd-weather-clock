@@ -22,8 +22,14 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <stdio.h>
+/* The RTC is disciplined twice a day - it drifts slowly and there is no
+   reason to spend WiFi on it more often. Weather is separate: a "current"
+   reading that is half a day old is not a current reading, so it refreshes
+   on its own, shorter cycle. Both share one WiFi bring-up when they happen
+   to fall together. */
 #define SYNC_HOUR_1 5
 #define SYNC_HOUR_2 15
+#define WEATHER_REFRESH_MIN 30
 #define BATTERY_WARNING_MV  3200
 #define BATTERY_CRITICAL_MV 3100
 static const char *TAG = "ClockTask";
@@ -412,6 +418,9 @@ static void clock_task(void *arg)
 
     int last_sync_hour = -1;
     int last_minute = -1;
+    /* Seeded from the boot sync, which already fetched, so the first minute
+       tick does not immediately fetch again. */
+    int last_weather_slot = (t.tm_hour * 60 + t.tm_min) / WEATHER_REFRESH_MIN;
     int64_t prev_work_us = 0;
     for (;;) {
         /* Hold a real 1s cadence: the per-second Cal+Clock dial redraw adds
@@ -487,18 +496,41 @@ static void clock_task(void *arg)
         if (now.tm_min != last_minute) {
             last_minute = now.tm_min;
 
-            bool is_sync_hour = (now.tm_hour == SYNC_HOUR_1 || now.tm_hour == SYNC_HOUR_2);
+            const bool is_sync_hour =
+                (now.tm_hour == SYNC_HOUR_1 || now.tm_hour == SYNC_HOUR_2);
+            const bool time_due =
+                is_sync_hour && now.tm_min == 0 && last_sync_hour != now.tm_hour;
 
-            if (is_sync_hour && now.tm_min == 0 && last_sync_hour != now.tm_hour) {
-                ESP_LOGI(TAG, "Scheduled sync at %02d:00 (time + weather)...", now.tm_hour);
+            const int weather_slot =
+                (now.tm_hour * 60 + now.tm_min) / WEATHER_REFRESH_MIN;
+            const bool weather_due = (weather_slot != last_weather_slot);
+
+            if (time_due || weather_due) {
+                ESP_LOGI(TAG, "Scheduled sync at %02d:%02d (%s)...",
+                         now.tm_hour, now.tm_min,
+                         time_due ? "time + weather" : "weather");
+
+                /* One WiFi bring-up serves both. SNTP runs either way because
+                   that is what the API does, but the RTC is only written on a
+                   time_due tick - a weather refresh should not be able to jump
+                   the clock. */
                 struct tm ntp_utc;
-                if (WifiSync_SyncTimeOnce(&ntp_utc, CLOCK_WIFI_SSID, CLOCK_WIFI_PASS, 15000, wifi_connected_cb, s_weather)) {
+                const bool ok = WifiSync_SyncTimeOnce(&ntp_utc, CLOCK_WIFI_SSID,
+                                                      CLOCK_WIFI_PASS, 15000,
+                                                      wifi_connected_cb, s_weather);
+                if (ok && time_due) {
                     Pcf85063_SetTime(&ntp_utc);
                     ClockTime_UtcToLocal(&ntp_utc, &now);
                     update_sync_label(&now);
                 }
                 update_forecast_labels(s_weather);
-                last_sync_hour = now.tm_hour;
+
+                if (time_due) {
+                    last_sync_hour = now.tm_hour;
+                }
+                /* Advance the slot even on failure, so a persistent outage
+                   retries on the next cycle rather than every minute. */
+                last_weather_slot = weather_slot;
             }
 
             if (Shtc3_Read(&temperature, &humidity) != ESP_OK) {
