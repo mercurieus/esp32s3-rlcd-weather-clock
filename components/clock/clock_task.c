@@ -19,6 +19,7 @@
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "esp_sleep.h"
+#include "esp_system.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <stdio.h>
@@ -100,6 +101,29 @@ static void set_status(const char *text)
     }
 }
 
+/* DIAGNOSTIC: why the device last restarted. Shown on the panel rather than
+   only logged, because the serial link to this board is unreliable and the
+   restart being investigated happens on a WiFi refresh, hours apart. Panic
+   (SW_CPU_RESET) and brownout are the two candidates for the reboot seen on
+   weather refresh, and they need completely different fixes, so telling them
+   apart is the whole point. */
+static const char *reset_reason_str(void)
+{
+    switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:  return "power-on";
+    case ESP_RST_EXT:      return "ext-pin";
+    case ESP_RST_SW:       return "sw-restart";
+    case ESP_RST_PANIC:    return "PANIC";
+    case ESP_RST_INT_WDT:  return "INT-WDT";
+    case ESP_RST_TASK_WDT: return "TASK-WDT";
+    case ESP_RST_WDT:      return "WDT";
+    case ESP_RST_DEEPSLEEP: return "deepsleep";
+    case ESP_RST_BROWNOUT: return "BROWNOUT";
+    case ESP_RST_SDIO:     return "sdio";
+    default:               return "unknown";
+    }
+}
+
 static void update_sync_label(const struct tm *t)
 {
     if (Lvgl_lock(-1)) {
@@ -107,10 +131,13 @@ static void update_sync_label(const struct tm *t)
         int uptime_days = (int)(uptime_sec / 86400);
         int uptime_hours = (int)((uptime_sec % 86400) / 3600);
 
-        lv_label_set_text_fmt(objects.sync, "Last weather sync: %02d.%02d.%04d %02d:%02d  Uptime: %dd %dh",
+        lv_label_set_text_fmt(objects.sync,
+                               "Last weather sync: %02d.%02d.%04d %02d:%02d  Uptime: %dd %dh\n"
+                               "Last restart: %s",
                                t->tm_mday, t->tm_mon + 1, t->tm_year + 1900,
                                t->tm_hour, t->tm_min,
-                               uptime_days, uptime_hours);
+                               uptime_days, uptime_hours,
+                               reset_reason_str());
         Lvgl_Refresh();
         Lvgl_unlock();
     }
@@ -408,6 +435,8 @@ static void clock_task(void *arg)
     update_labels(&t, temperature, humidity, battery_mv);
     update_forecast_labels(s_weather);
 
+    ESP_LOGW(TAG, "Boot: last reset reason = %s", reset_reason_str());
+
     set_status("Starting...");
     vTaskDelay(pdMS_TO_TICKS(800));
 
@@ -533,8 +562,11 @@ static void clock_task(void *arg)
                 if (ok && time_due) {
                     Pcf85063_SetTime(&ntp_utc);
                     ClockTime_UtcToLocal(&ntp_utc, &now);
-                    update_sync_label(&now);
                 }
+                /* The label says "last weather sync", so it has to follow the
+                   weather cycle, not the twice-daily time sync it used to
+                   share a bring-up with. */
+                update_sync_label(&now);
                 update_forecast_labels(s_weather);
 
                 if (time_due) {
