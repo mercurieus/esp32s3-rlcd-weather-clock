@@ -12,7 +12,7 @@ Do not reuse any of this for the similarly-named `ESP32-S3-Touch-LCD-*` boards.
 | --- | --- | --- |
 | MCU | ESP32-S3-WROOM-1-N16R8, dual Xtensa LX7, to 240 MHz | |
 | Flash | 16 MB Quad SPI | A full dump is exactly `0x1000000` = 16,777,216 bytes |
-| PSRAM | 8 MB Octal SPI | ESP-IDF: Octal 80 MHz. Confirm from boot log or `esp_psram_get_size()`, never from `flash-id` |
+| PSRAM | 8 MB Octal SPI | ESP-IDF: Octal 80 MHz. Confirm from boot log or `esp_psram_get_size()`, never from `flash_id` |
 | Display | ST7305, 300x400 monochrome fully-reflective, **no backlight** | Presented as 400x300 landscape |
 | Touch | **None** | No touch controller enumerates. Never add a touch driver or LVGL input device |
 
@@ -55,35 +55,55 @@ RESET" is wrong here. Waveshare's procedure:
 2. **Hold BOOT.**
 3. **Short-press PWR** to power on, keep BOOT held about 1 second, then release.
 4. Re-list serial ports — the native USB re-enumerates and the port number may change.
-5. `idf.py -p COM8 flash`, or `python -m esptool --chip esp32s3 -p COM8 flash-id`.
+5. `idf.py -p COM8 flash`, or `python -m esptool --chip esp32s3 -p COM8 flash_id`.
 
 GPIO0 low at reset enters the ROM serial bootloader; GPIO46 must be floating or
 low or the downloader is not reached.
 
-## The UART escape hatch
+## Serial and light sleep
 
 `esp_light_sleep_start()` suspends USB Serial/JTAG, and this project's console is
 USB-only (`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`, `CONFIG_ESP_CONSOLE_UART_NUM=-1`),
-so there is no log to read while the app runs.
+so sleeping through every second used to make the port vanish continuously.
 
-**UART0 on TX 43 / RX 44 is the way out** if a real log is ever needed: set
-`CONFIG_ESP_CONSOLE_UART_DEFAULT` (or the secondary console) and attach a
-USB-serial adapter. A UART does not vanish from the host when the chip sleeps, so
-it survives the sleep loop that makes USB CDC unusable.
+Since `b98fcf8` the clock loop calls `usb_serial_jtag_is_connected()` and stays
+awake while a host is attached, so **on USB the port is stable and flashing and
+monitoring both work normally.** On battery it sleeps and the port is gone, which
+is correct.
 
-Until that is wired up, put diagnostics **on the panel** — that is why the last
-`esp_reset_reason()` is displayed on the settings screen.
+**UART0 on TX 43 / RX 44** remains the escape hatch for a log from a *battery*
+board: set `CONFIG_ESP_CONSOLE_UART_DEFAULT` (or the secondary console) and attach
+a USB-serial adapter. A UART does not vanish from the host when the chip sleeps.
+
+Diagnostics that must survive a sleeping board still belong **on the panel** —
+that is why the last `esp_reset_reason()` is displayed on the settings screen.
 
 ## Back up before the first write
 
 Enter download mode first. Treat dumps as sensitive: they contain NVS, which holds
 Wi-Fi credentials. Do not commit one.
 
+**This esptool takes underscore subcommands** - `read_flash`, not `read-flash`.
+The hyphenated spelling in Espressif's current docs is rejected outright by the
+version ESP-IDF 5.5.5 ships here.
+
 ```powershell
-python -m esptool --chip esp32s3 -p COM8 flash-id
-python -m esptool --chip esp32s3 -p COM8 read-flash 0x0 0x1000000 factory-backup.bin
-(Get-Item factory-backup.bin).Length          # must be 16777216
-Get-FileHash factory-backup.bin -Algorithm SHA256
+python -m esptool --chip esp32s3 -p COM8 flash_id
+python -m esptool --chip esp32s3 -p COM8 -b 921600 --after hard_reset `
+    read_flash 0x0 0x1000000 backup.bin
+(Get-Item backup.bin).Length                  # must be 16777216
+Get-FileHash backup.bin -Algorithm SHA256
+```
+
+Takes about 5 minutes at 921600. **Keep it out of the repo** - `.gitignore` has no
+rule that would catch it, and it contains NVS.
+
+This unit's backup, taken 2026-09-09:
+
+```text
+D:\Projects\ESP32\_board-backups\rlcd-clock-full-flash-2026-09-09.bin
+16,777,216 bytes
+sha256: db284403009ec889bcefcd1e85734991f3c4e85508f604b5f537531aa197356c
 ```
 
 ## Restore
@@ -92,8 +112,8 @@ Get-FileHash factory-backup.bin -Algorithm SHA256
 calibration and settings:
 
 ```powershell
-python -m esptool --chip esp32s3 -p COM8 write-flash 0x0 factory-backup.bin
-python -m esptool --chip esp32s3 -p COM8 verify-flash 0x0 factory-backup.bin
+python -m esptool --chip esp32s3 -p COM8 write_flash 0x0 backup.bin
+python -m esptool --chip esp32s3 -p COM8 verify_flash 0x0 backup.bin
 ```
 
 **From Waveshare's factory image** — restores the demo, *not* your data. Pinned to
@@ -105,8 +125,8 @@ size:   4,548,144 bytes
 sha256: d0591315a722d33f4a08931a0341ab840a6c15c56b289d621e8fc18bec8d55a8
 ```
 
-Verify the hash before writing, then `write-flash 0x0` (it is a merged image).
-`erase-flash` first only if a genuinely clean state is wanted — it destroys
+Verify the hash before writing, then `write_flash 0x0` (it is a merged image).
+`erase_flash` first only if a genuinely clean state is wanted — it destroys
 everything, so it requires a verified backup first, and it is blocked by default
 under Secure Boot or Flash Encryption. Never `--force` against an unknown
 security state.
