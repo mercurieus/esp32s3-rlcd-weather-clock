@@ -41,9 +41,18 @@ Confusing these wastes replugs on a problem that is a monitor left open.
 
 ### Download mode is the reliable path
 
-Hold **BOOT**, tap **RESET**, release **BOOT**. The screen stays blank - correct,
-that is the ROM loader. It runs before any application, so it is immune to the
-sleep loop and flashes first-try when normal flashing will not connect.
+**This board has no RESET button.** Buttons are, left to right, **PWR, KEY, BOOT**.
+
+1. **Long-press PWR** to power off.
+2. **Hold BOOT.**
+3. **Short-press PWR**, keep BOOT held about a second, release.
+
+The screen stays blank - correct, that is the ROM loader. It runs before any
+application, so it is immune to the sleep loop and connects when normal flashing
+will not. The port may re-enumerate under a different number afterwards.
+
+GPIO0 low at reset selects the ROM bootloader; GPIO46 must stay floating or low
+or the downloader is never reached.
 
 ## Serial logging does not work on this firmware
 
@@ -63,6 +72,10 @@ appear and vanish continuously.
   `esp_reset_reason()` for exactly this reason - it is the only channel that
   survives.
 - The chronic port flakiness is this, not a failing cable or board.
+
+**If a real log is ever needed**, UART0 is on TX 43 / RX 44 and a UART does not
+vanish from the host when the chip sleeps. Switch the console to it and attach a
+USB-serial adapter. See [references/board-hardware.md](references/board-hardware.md).
 
 ## The panel is 1-bit - design for it
 
@@ -122,7 +135,9 @@ shrink - it let the face date go back up from montserrat_14 to _16.
 ## Board contract
 
 Verified against `main/user_config.h`; do not reuse for similarly-named Touch-LCD
-boards.
+boards. Full peripheral pin map, I2C addresses, backup/restore commands and the
+pinned Waveshare factory image hash are in
+[references/board-hardware.md](references/board-hardware.md).
 
 - ESP32-S3-WROOM-1-N16R8; 16MB Flash QIO; 8MB Octal PSRAM at 80MHz.
 - Display SPI: SCK 11, MOSI 12, DC 5, CS 40, RST 41, TE 6. No MISO.
@@ -189,8 +204,16 @@ sceptically.
 
 1. `otadata` corrupt - the ROM bootloader falls back to `factory` unaided.
 2. App broken, USB enumerating - reflash from the host.
-3. USB not enumerating - download mode (hold BOOT, tap RESET).
+3. USB not enumerating - download mode (PWR off, hold BOOT, PWR on).
 4. Only then restore a full verified dump from offset `0x0`.
+
+Only this board's own dump restores its NVS and calibration; Waveshare's factory
+image restores the demo and nothing of yours. Commands and the pinned image hash
+are in [references/board-hardware.md](references/board-hardware.md). **Take a
+16 MB backup before the first write** - none exists for this unit yet.
+
+The RTC holder charges its cell: **ML1220 or compatible rechargeable only, never
+CR1220.**
 
 `erase-flash` is not a fix for connection trouble. Never use esptool `--force`
 against unknown Secure Boot or Flash Encryption state.
