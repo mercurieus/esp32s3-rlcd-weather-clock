@@ -78,9 +78,31 @@ bool WifiSync_SyncTimeOnce(struct tm *out_time, const char *ssid, const char *pa
         wifi_config.sta.bssid_set = true;
     }
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    /* Deliberately NOT ESP_ERROR_CHECK. These three used to abort - which
+       reboots the device - on any non-OK return. That is defensible for the
+       first call at boot, where a failure means the device is unusable
+       anyway, but this function runs again on every refresh, and by then a
+       transient error is something to report and retry, not to die on. A
+       failed refresh should cost a stale reading, not an uptime. */
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (err == ESP_OK) {
+        err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+    }
+    if (err == ESP_OK) {
+        err = esp_wifi_start();
+        /* Already started means a previous run tore down incompletely; the
+           radio is usable as-is, so carry on rather than treating it as a
+           failure. */
+        if (err == ESP_ERR_WIFI_CONN || err == ESP_ERR_WIFI_NOT_STOPPED) {
+            ESP_LOGW(TAG, "esp_wifi_start: %s - continuing", esp_err_to_name(err));
+            err = ESP_OK;
+        }
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "WiFi bring-up failed: %s", esp_err_to_name(err));
+        esp_wifi_stop();
+        return false;
+    }
 
     const int max_attempts = 3;
     bool connected = false;

@@ -124,6 +124,18 @@ static const char *reset_reason_str(void)
     }
 }
 
+/* The sync runs inline on this task and blocks it for seconds at a time, so
+   the indicator has to be painted before the call and left for the next tick
+   to clear - nothing else gets to run in between. */
+static void set_sync_busy(bool busy)
+{
+    if (Lvgl_lock(-1)) {
+        Overlay_SetSyncBusy(busy);
+        Lvgl_Refresh();
+        Lvgl_unlock();
+    }
+}
+
 static void update_sync_label(const struct tm *t)
 {
     if (Lvgl_lock(-1)) {
@@ -556,9 +568,11 @@ static void clock_task(void *arg)
                    time_due tick - a weather refresh should not be able to jump
                    the clock. */
                 struct tm ntp_utc;
+                set_sync_busy(true);
                 const bool ok = WifiSync_SyncTimeOnce(&ntp_utc, CLOCK_WIFI_SSID,
                                                       CLOCK_WIFI_PASS, 15000,
                                                       wifi_connected_cb, s_weather);
+                set_sync_busy(false);
                 if (ok && time_due) {
                     Pcf85063_SetTime(&ntp_utc);
                     ClockTime_UtcToLocal(&ntp_utc, &now);
