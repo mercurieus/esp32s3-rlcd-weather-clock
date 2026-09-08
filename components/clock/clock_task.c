@@ -20,6 +20,7 @@
 #include "driver/gpio.h"
 #include "esp_sleep.h"
 #include "esp_system.h"
+#include "driver/usb_serial_jtag.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <stdio.h>
@@ -483,8 +484,25 @@ static void clock_task(void *arg)
         uint64_t sleep_us = prev_work_us >= 1000000
                                 ? 1000
                                 : (1000000ULL - (uint64_t)prev_work_us);
-        esp_sleep_enable_timer_wakeup(sleep_us);
-        esp_light_sleep_start();
+
+        /* Light sleep suspends the USB Serial/JTAG peripheral, and this
+           project's console has no UART fallback, so sleeping through every
+           second is what makes the port vanish while the app runs - the
+           console is unreadable and flashing has to race a window that is
+           mostly not there.
+
+           With a host actually attached, none of that is worth saving: the
+           board is on USB power, so stay awake and keep the port up.
+           usb_serial_jtag_is_connected() tracks SOF packets, so a charger or
+           power bank reads as not-connected and still gets the battery
+           behaviour, which is the right answer - there is no serial to keep
+           alive on those anyway. */
+        if (usb_serial_jtag_is_connected()) {
+            vTaskDelay(pdMS_TO_TICKS(sleep_us / 1000));
+        } else {
+            esp_sleep_enable_timer_wakeup(sleep_us);
+            esp_light_sleep_start();
+        }
 
         int64_t cycle_start_us = esp_timer_get_time();
 
