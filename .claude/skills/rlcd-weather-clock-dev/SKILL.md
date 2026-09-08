@@ -23,10 +23,12 @@ idf.py -p COM8 flash
 
 - **The clock is COM8.** If it fails, retry once, then ask for a replug. **Never
   scan for another port and use it.**
-- Identify by MAC before trusting any other port:
-  `python -m esptool -p COMn read_mac --after no_reset` (read-only; will not
-  disturb whatever runs on the other ports). Record this board's MAC here the
-  first time it is read, then match on it rather than on a port number.
+- **This board's MAC ends `..:af:90`** (Espressif OUI `94:a9:90`; the middle
+  octet is deliberately not recorded here) (ESP32-S3 QFN56 rev v0.2, 8MB
+  embedded PSRAM, 40MHz crystal). Confirm any uncertain port against it:
+  `python -m esptool --chip esp32s3 -p COMn --after no_reset read_mac`, which is
+  read-only and will not disturb whatever runs on the other ports. Use
+  `--after hard_reset` on the real board so the application restarts.
 - Invoke esptool as `python -m esptool` - the console script has been named both
   `esptool.py` and `esptool` across IDF versions; the module name has not moved.
 
@@ -54,28 +56,31 @@ will not. The port may re-enumerate under a different number afterwards.
 GPIO0 low at reset selects the ROM bootloader; GPIO46 must stay floating or low
 or the downloader is never reached.
 
-## Serial logging does not work on this firmware
+## Serial works on USB, not on battery - by design
 
-`esp_light_sleep_start()` suspends the USB Serial/JTAG peripheral, and the clock
-task sleeps for most of every second. The console is USB Serial/JTAG **only**
-(`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`, `CONFIG_ESP_CONSOLE_UART_NUM=-1`), so
-there is no UART fallback: while the application runs, the host sees the device
-appear and vanish continuously.
+`esp_light_sleep_start()` suspends the USB Serial/JTAG peripheral, and the console
+is USB Serial/JTAG **only** (`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`,
+`CONFIG_ESP_CONSOLE_UART_NUM=-1`) - no UART fallback. Sleeping through every
+second therefore made the port vanish continuously.
 
-**Consequences, all of which have cost time here:**
+Since `b98fcf8` the loop checks `usb_serial_jtag_is_connected()` and uses
+`vTaskDelay` instead of sleeping while a host is attached, so **on USB the port
+is stable and `flash` and `monitor` both behave normally.** On battery it sleeps
+exactly as before and the port is gone - that is correct, not a fault.
 
-- A 40-minute background capture of COM8 recorded zero bytes and hundreds of
-  "port lost" lines. That is the expected result, not a broken script.
-- `ESP_LOGx` is effectively write-only in normal operation. Do not plan a
-  diagnosis around reading the log.
-- **Put diagnostics on the panel.** The settings screen carries the last
-  `esp_reset_reason()` for exactly this reason - it is the only channel that
-  survives.
-- The chronic port flakiness is this, not a failing cable or board.
+Detection is by USB SOF packets, not bus voltage, so a charger or power bank
+reads as not-connected and keeps the battery behaviour. A voltage heuristic
+cannot do this: a full cell at 4.2V is indistinguishable from USB power.
 
-**If a real log is ever needed**, UART0 is on TX 43 / RX 44 and a UART does not
-vanish from the host when the chip sleeps. Switch the console to it and attach a
-USB-serial adapter. See [references/board-hardware.md](references/board-hardware.md).
+**If the port is unopenable anyway**, the firmware predates `b98fcf8` or is not
+running. What that looked like: 206 consecutive esptool attempts failing with
+"device attached to the system is not functioning", and a 40-minute serial
+capture recording zero bytes. That is the sleep loop, not a bad cable.
+
+Diagnostics that must survive a sleeping board still belong **on the panel** -
+the settings screen carries the last `esp_reset_reason()` for that reason. UART0
+on TX 43 / RX 44 is the other escape hatch; see
+[references/board-hardware.md](references/board-hardware.md).
 
 ## The panel is 1-bit - design for it
 
