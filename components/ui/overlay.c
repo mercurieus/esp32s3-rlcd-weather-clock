@@ -13,6 +13,7 @@ static lv_obj_t *s_hum_trend;
 static lv_obj_t *s_weather_icon;
 static lv_obj_t *s_outdoor;
 static lv_obj_t *s_sync;
+static bool      s_sync_busy;
 static lv_obj_t *s_battery_volts;
 static lv_obj_t *s_battery_fill;
 static lv_obj_t *s_focus;
@@ -298,7 +299,11 @@ void Overlay_SetTopBar(const char *temp, const char *hum,
     }
     lv_label_set_text(s_temp, temp);
     lv_label_set_text(s_hum, hum);
-    lv_label_set_text(s_sync, data_stale ? LV_SYMBOL_WARNING : "");
+    /* A sync in progress owns the slot: it is the more useful thing to say,
+       and the reading is about to be replaced anyway. */
+    if (!s_sync_busy) {
+        lv_label_set_text(s_sync, data_stale ? LV_SYMBOL_WARNING : "");
+    }
     lv_label_set_text(s_battery_volts, battery_volts);
 
     /* Round to the nearest pixel, but never round a battery that still has
@@ -322,6 +327,20 @@ void Overlay_SetTopBar(const char *temp, const char *hum,
         lv_obj_remove_flag(s_weather_icon, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(s_outdoor, outdoor);
     }
+}
+
+void Overlay_SetSyncBusy(bool busy)
+{
+    if (!s_sync) {
+        return;
+    }
+    s_sync_busy = busy;
+    if (busy) {
+        lv_label_set_text(s_sync, LV_SYMBOL_REFRESH);
+    }
+    /* Leaving busy does not clear the slot here - the next Overlay_SetTopBar
+       decides between the stale warning and nothing, which is the same
+       decision it makes at every other tick. */
 }
 
 void Overlay_ShowFocus(const lv_area_t *area)

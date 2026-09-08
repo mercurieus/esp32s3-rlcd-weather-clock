@@ -22,6 +22,10 @@ void Overlay_SetTopBar(const char *temp, const char *hum,
 
 /* Draws the focus frame around an absolute screen rectangle.
    Pass NULL to hide it. */
+/* Marks a sync as in progress, so the status slot shows activity instead of
+   the stale warning. Overlay_SetTopBar leaves the slot alone while busy. */
+void Overlay_SetSyncBusy(bool busy);
+
 void Overlay_ShowFocus(const lv_area_t *area);
 
 /* Shows the hint overlay for duration_ms: a single line, Key (Select)
