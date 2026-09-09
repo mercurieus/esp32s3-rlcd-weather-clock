@@ -121,7 +121,15 @@ static const char *reset_reason_str(void)
     case ESP_RST_DEEPSLEEP: return "deepsleep";
     case ESP_RST_BROWNOUT: return "BROWNOUT";
     case ESP_RST_SDIO:     return "sdio";
-    default:               return "unknown";
+    /* These five exist in IDF 5.5 and were missing, so a USB-triggered reset -
+       which is what a host opening the serial port produces - reported as
+       "unknown" and looked like a gap in the tool rather than an answer. */
+    case ESP_RST_USB:        return "USB-host";
+    case ESP_RST_JTAG:       return "jtag";
+    case ESP_RST_EFUSE:      return "efuse-err";
+    case ESP_RST_PWR_GLITCH: return "PWR-GLITCH";
+    case ESP_RST_CPU_LOCKUP: return "CPU-LOCKUP";
+    default:                 return "unknown";
     }
 }
 
@@ -144,10 +152,15 @@ static void update_sync_label(const struct tm *t)
         int uptime_days = (int)(uptime_sec / 86400);
         int uptime_hours = (int)((uptime_sec % 86400) / 3600);
 
+        /* One line, not two. This label sits at y285 on a 300px panel and
+           montserrat_12's line_height is 15, so a second line lands at
+           y300..315 - entirely off the screen, drawn and invisible. The text
+           is abbreviated instead: at montserrat_12 this is ~276px inside the
+           400px width, where the two-line version's first line alone was
+           313px and the single-line combination would have been 447px. */
         lv_label_set_text_fmt(objects.sync,
-                               "Last weather sync: %02d.%02d.%04d %02d:%02d  Uptime: %dd %dh\n"
-                               "Last restart: %s",
-                               t->tm_mday, t->tm_mon + 1, t->tm_year + 1900,
+                               "Sync %02d.%02d %02d:%02d   Up %dd %dh   Rst: %s",
+                               t->tm_mday, t->tm_mon + 1,
                                t->tm_hour, t->tm_min,
                                uptime_days, uptime_hours,
                                reset_reason_str());
