@@ -201,13 +201,16 @@ void Overlay_Create(void)
 
     s_outdoor = overlay_label(top, 225, RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "");
 
-    /* Sync status. The useful signal on this device is not link state -
-       WiFi is down almost all the time by design - but whether the data on
-       screen is still worth believing. So: nothing at all while the last
-       fetch is recent, and a warning glyph once it has gone stale. An
-       always-present "connected" icon would be noise; an absent one is the
-       quiet default, which is what a status indicator should be. */
-    s_sync = overlay_label(top, 285, RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, "");
+    /* Sync status: a WiFi glyph while the data on screen is still worth
+       believing, a warning once it has gone stale, and a refresh glyph while a
+       sync is actually running. The slot is never empty - a blank reads as "no
+       feature here" rather than as "all is well", and on a panel with no colour
+       an absent glyph is indistinguishable from a bug.
+
+       It tracks data freshness rather than live link state, because the radio
+       is down between refreshes by design and an indicator that spent 29 of
+       every 30 minutes showing "disconnected" would be worse than none. */
+    s_sync = overlay_label(top, 285, RAIL_TEXT_Y, 0, LV_TEXT_ALIGN_LEFT, LV_SYMBOL_WIFI);
 
     /* Battery: the voltage, then a small hollow gauge and its nub. The
        reading is montserrat_16 rather than the row's 20pt - it is the least
@@ -302,7 +305,7 @@ void Overlay_SetTopBar(const char *temp, const char *hum,
     /* A sync in progress owns the slot: it is the more useful thing to say,
        and the reading is about to be replaced anyway. */
     if (!s_sync_busy) {
-        lv_label_set_text(s_sync, data_stale ? LV_SYMBOL_WARNING : "");
+        lv_label_set_text(s_sync, data_stale ? LV_SYMBOL_WARNING : LV_SYMBOL_WIFI);
     }
     lv_label_set_text(s_battery_volts, battery_volts);
 

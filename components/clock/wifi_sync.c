@@ -23,10 +23,17 @@ static bool    s_wifi_hint_valid = false;
 static uint8_t s_wifi_channel = 0;
 static uint8_t s_wifi_bssid[6];
 
+/* STA_START owns the first connect attempt of every bring-up. esp_wifi_start()
+   posts it asynchronously, so the caller cannot reliably connect itself before
+   the driver is ready - which is why this handler exists and why the attempt
+   loop below must not also connect on its first pass. */
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        esp_err_t cerr = esp_wifi_connect();
+        if (cerr != ESP_OK) {
+            ESP_LOGW(TAG, "esp_wifi_connect on STA_START: %s", esp_err_to_name(cerr));
+        }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         xEventGroupSetBits(s_event_group, WIFI_FAIL_BIT);
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
@@ -123,8 +130,10 @@ bool WifiSync_SyncTimeOnce(struct tm *out_time, const char *ssid, const char *pa
             ESP_LOGW(TAG, "WiFi connection attempt %d/%d (full scan)...", attempt, max_attempts);
             esp_wifi_connect();
         } else if (use_hint) {
+            /* No esp_wifi_connect() here: STA_START has already issued it with
+               this same config. Calling it again raced the driver and logged
+               "sta is connecting, return error" on every hinted bring-up. */
             ESP_LOGI(TAG, "Connecting to WiFi using known channel/BSSID...");
-            esp_wifi_connect();
         }
 
         bits = xEventGroupWaitBits(s_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
