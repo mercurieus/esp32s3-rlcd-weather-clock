@@ -37,3 +37,16 @@ CONFIG_LV_FONT_MONTSERRAT_42=y
 CONFIG_LV_FONT_MONTSERRAT_44=y
 CONFIG_LV_FONT_MONTSERRAT_46=y
 CONFIG_LV_FONT_MONTSERRAT_48=y
+
+# Panic diagnostics: write a core dump to flash so an intermittent crash can be
+# read back afterwards with espcoredump.py, instead of only being visible to
+# whoever happens to have a serial monitor attached at the moment it happens.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=64
+CONFIG_ESP_COREDUMP_USE_STACK_SIZE=y
+CONFIG_ESP_COREDUMP_STACK_SIZE=1280
+# Give the panic handler time to flush over USB CDC before it resets.
+CONFIG_ESP_SYSTEM_PANIC_REBOOT_DELAY_SECONDS=5
+
