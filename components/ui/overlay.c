@@ -16,6 +16,7 @@ static lv_obj_t *s_sync;
 static bool      s_sync_busy;
 static lv_obj_t *s_battery_volts;
 static lv_obj_t *s_battery_fill;
+static lv_obj_t *s_battery_bolt;
 static lv_obj_t *s_focus;
 static lv_obj_t *s_hint_box;
 static lv_obj_t *s_hint_key_label;
@@ -241,6 +242,23 @@ void Overlay_Create(void)
     lv_obj_set_style_bg_color(s_battery_fill, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(s_battery_fill, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    /* Charging: a bolt inside the outline, with the fill hidden. The fill is
+       solid black, so a glyph drawn over it would be invisible on a 1-bit
+       panel - the two have to be alternatives, not layers. Hiding the level
+       while charging is also the honest reading: it is climbing, and the
+       conventional phone idiom says the same thing.
+
+       montserrat_12 because the well is small: LV_SYMBOL_CHARGE is 7.5px wide
+       with a 15px line height, and the frame's 2px border leaves an inner box
+       of x364..387 by y7..22. Centred in that: x372, y7. */
+    s_battery_bolt = lv_label_create(top);
+    lv_obj_set_pos(s_battery_bolt, 372, 7);
+    lv_obj_set_size(s_battery_bolt, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_text_font(s_battery_bolt, &lv_font_montserrat_12, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(s_battery_bolt, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_label_set_text_static(s_battery_bolt, LV_SYMBOL_CHARGE);
+    lv_obj_add_flag(s_battery_bolt, LV_OBJ_FLAG_HIDDEN);
+
     /* Focus frame. 3 px so it survives the 1 bit threshold, and hidden
        until a focusable element is selected. */
     s_focus = overlay_frame(top, 0, 0, 10, 10);
@@ -295,7 +313,8 @@ void Overlay_Create(void)
 void Overlay_SetTopBar(const char *temp, const char *hum,
                        const lv_image_dsc_t *weather_icon, const char *outdoor,
                        bool data_stale,
-                       const char *battery_volts, int battery_pct)
+                       const char *battery_volts, int battery_pct,
+                       bool charging)
 {
     if (!s_temp) {
         return;
@@ -318,6 +337,14 @@ void Overlay_SetTopBar(const char *temp, const char *hum,
         fill_w = 1;
     }
     lv_obj_set_width(s_battery_fill, fill_w);
+
+    if (charging) {
+        lv_obj_add_flag(s_battery_fill, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_battery_bolt, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_remove_flag(s_battery_fill, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_battery_bolt, LV_OBJ_FLAG_HIDDEN);
+    }
 
     /* Before the first successful fetch there is no forecast to show, and
        a stale icon would be worse than an empty slot - hide both halves of
