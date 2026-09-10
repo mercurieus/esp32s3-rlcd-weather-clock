@@ -10,3 +10,6 @@ sdkconfig.old
 *.swp
 *~
 .DS_Store
+
+# Generated, and holds Wi-Fi credentials and location - configure with idf.py menuconfig
+sdkconfig

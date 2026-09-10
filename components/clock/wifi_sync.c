@@ -1,5 +1,4 @@
 #include "wifi_sync.h"
-#include "clock_config.h"
 
 #include "esp_wifi.h"
 #include "esp_netif.h"
@@ -162,7 +161,7 @@ bool WifiSync_SyncTimeOnce(struct tm *out_time, const char *ssid, const char *pa
 
     if (connected) {
         ESP_LOGI(TAG, "Connected to WiFi, fetching NTP time...");
-        esp_sntp_config_t sntp_config = ESP_NETIF_SNTP_DEFAULT_CONFIG(CLOCK_NTP_SERVER);
+        esp_sntp_config_t sntp_config = ESP_NETIF_SNTP_DEFAULT_CONFIG(CONFIG_CLOCK_NTP_SERVER);
         esp_netif_sntp_init(&sntp_config);
 
         if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(timeout_ms)) == ESP_OK) {

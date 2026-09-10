@@ -1,5 +1,4 @@
 #include "weather.h"
-#include "weather_config.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "cJSON.h"
@@ -52,7 +51,7 @@ static bool weather_fetch_once(WeatherDay days_out[4], WeatherNow *now_out)
         "&daily=weathercode,temperature_2m_max,temperature_2m_min"
         "&current_weather=true"
         "&timezone=auto&forecast_days=4",
-        WEATHER_LATITUDE, WEATHER_LONGITUDE);
+        CONFIG_WEATHER_LATITUDE, CONFIG_WEATHER_LONGITUDE);
 
     static char response[4096];
     response[0] = '\0';

@@ -16,10 +16,23 @@ The project was written from scratch in **VS Code with ESP-IDF**, with help from
 
 ## Setup
 
-Before flashing, edit the config headers under `components/clock/` with your own details:
+Everything configurable lives in menuconfig, under **Weather Clock**:
 
-- `clock_config.h` — your Wi-Fi SSID and password
-- `weather_config.h` — your location (latitude / longitude) for the weather forecast
+```
+idf.py menuconfig
+```
+
+| Submenu | What to set |
+|---|---|
+| Wi-Fi | SSID and password |
+| Time | POSIX timezone string, NTP server, the two daily time-sync hours |
+| Weather | Latitude and longitude, refresh interval, stale threshold |
+| Battery | Low-battery warning and critical-shutdown thresholds |
+
+Your answers are written to `sdkconfig`, which is **not tracked by git** — it
+holds your Wi-Fi password and your location. `sdkconfig.defaults` is tracked and
+carries only project-wide settings, so a fresh clone builds with empty
+credentials and you set your own.
 
 ## Controls
 
@@ -31,7 +44,9 @@ Before flashing, edit the config headers under `components/clock/` with your own
 
 ## How it works
 
-The clock spends most of its time in **light sleep** to save power. It wakes up once a minute to refresh the time from the internal RTC. Twice a day, at **05:00** and **15:00**, it connects to Wi-Fi to sync the RTC with NTP and fetch an updated weather forecast at the same time.
+The clock spends most of its time in **light sleep** to save power, waking once a minute to refresh the time from the internal RTC. Twice a day, at **05:00** and **15:00**, it syncs the RTC against NTP. Weather runs on its own shorter cycle - **every 30 minutes** by default - and shares a Wi-Fi bring-up with the time sync whenever the two coincide. All four values are configurable.
+
+While a USB host is attached the clock does not light-sleep at all: light sleep suspends the USB Serial/JTAG peripheral, which would make the serial port disappear. On battery it sleeps as normal.
 
 ## ⚠️ Battery life
 
