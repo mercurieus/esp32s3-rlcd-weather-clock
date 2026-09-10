@@ -20,6 +20,7 @@
 #include "driver/gpio.h"
 #include "esp_sleep.h"
 #include "esp_system.h"
+#include "esp_rom_sys.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -124,6 +125,13 @@ static const char *reset_reason_str(void)
     /* These five exist in IDF 5.5 and were missing, so a USB-triggered reset -
        which is what a host opening the serial port produces - reported as
        "unknown" and looked like a gap in the tool rather than an answer. */
+    /* On ESP32-S3 both USB causes collapse to ESP_RST_USB: IDF's
+       esp32s3/reset_reason.c maps RESET_REASON_CORE_USB_UART (0x15) and
+       RESET_REASON_CORE_USB_JTAG (0x16) to the same value. The raw code is
+       printed alongside so the two stay distinguishable - 0x15 is the CDC
+       side (esptool or a monitor opening the port), 0x16 the JTAG side (a
+       debugger). ESP_RST_JTAG itself is unreachable here; only C5/C6/C61/H2/
+       H21/P4 ever return it. */
     case ESP_RST_USB:        return "USB-host";
     case ESP_RST_JTAG:       return "jtag";
     case ESP_RST_EFUSE:      return "efuse-err";
@@ -170,16 +178,18 @@ static void refresh_sync_label(void)
            alone was 313px and the naive combination would have been 447px. */
         if (s_last_sync_valid) {
             lv_label_set_text_fmt(objects.sync,
-                                   "Sync %02d.%02d %02d:%02d   Up %dd %02dh %02dm   Rst: %s",
+                                   "Sync %02d.%02d %02d:%02d   Up %dd %02dh %02dm   Rst: %s/%02x",
                                    s_last_sync_tm.tm_mday, s_last_sync_tm.tm_mon + 1,
                                    s_last_sync_tm.tm_hour, s_last_sync_tm.tm_min,
                                    uptime_days, uptime_hours, uptime_mins,
-                                   reset_reason_str());
+                                   reset_reason_str(),
+                                   (unsigned)esp_rom_get_reset_reason(0));
         } else {
             lv_label_set_text_fmt(objects.sync,
-                                   "Sync --.-- --:--   Up %dd %02dh %02dm   Rst: %s",
+                                   "Sync --.-- --:--   Up %dd %02dh %02dm   Rst: %s/%02x",
                                    uptime_days, uptime_hours, uptime_mins,
-                                   reset_reason_str());
+                                   reset_reason_str(),
+                                   (unsigned)esp_rom_get_reset_reason(0));
         }
         Lvgl_Refresh();
         Lvgl_unlock();
@@ -485,7 +495,8 @@ static void clock_task(void *arg)
     update_labels(&t, temperature, humidity, battery_mv);
     update_forecast_labels(s_weather);
 
-    ESP_LOGW(TAG, "Boot: last reset reason = %s", reset_reason_str());
+    ESP_LOGW(TAG, "Boot: last reset reason = %s (raw 0x%02x)",
+             reset_reason_str(), (unsigned)esp_rom_get_reset_reason(0));
 
     set_status("Starting...");
     vTaskDelay(pdMS_TO_TICKS(800));
