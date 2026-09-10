@@ -290,8 +290,17 @@ static void update_labels(const struct tm *t, float temperature, float humidity,
             (s_last_fetch_us < 0) ||
             (esp_timer_get_time() - s_last_fetch_us > WEATHER_STALE_US);
 
+        /* "Charging" here means a USB host is attached, which is as close as
+           this board gets: nothing routes the charger IC's status pin to a
+           GPIO, so there is no way to read the actual charge state. SOF
+           detection at least never reports charging when nothing is plugged
+           in; its blind spot is the opposite case, a dumb charger or power
+           bank, which supplies power but sends no SOF and so reads as not
+           charging. Under-reporting is the right way round for this - a
+           missing bolt is a smaller lie than a false one. */
         Overlay_SetTopBar(temp_buf, hum_buf, out_icon, out_buf, data_stale,
-                          batt_buf, Battery_PercentFromMv(battery_mv));
+                          batt_buf, Battery_PercentFromMv(battery_mv),
+                          usb_serial_jtag_is_connected());
 
         Lvgl_Refresh();
         Lvgl_unlock();
