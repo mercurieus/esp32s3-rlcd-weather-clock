@@ -145,28 +145,52 @@ static void set_sync_busy(bool busy)
     }
 }
 
-static void update_sync_label(const struct tm *t)
+/* Last successful sync, kept so the status line can be redrawn on a tick that
+   is not itself a sync. Zeroed until the first one, which prints as --.--. */
+static struct tm s_last_sync_tm;
+static bool      s_last_sync_valid;
+
+/* Redraws the bottom status line. Called every minute rather than only on a
+   sync, so the uptime it shows is live: an uptime that only advanced twice an
+   hour could not distinguish "just rebooted" from "rebooted a while ago", and
+   that distinction is the whole point of the line. */
+static void refresh_sync_label(void)
 {
     if (Lvgl_lock(-1)) {
         int64_t uptime_sec = esp_timer_get_time() / 1000000LL;
-        int uptime_days = (int)(uptime_sec / 86400);
+        int uptime_days  = (int)(uptime_sec / 86400);
         int uptime_hours = (int)((uptime_sec % 86400) / 3600);
+        int uptime_mins  = (int)((uptime_sec % 3600) / 60);
 
         /* One line, not two. This label sits at y285 on a 300px panel and
            montserrat_12's line_height is 15, so a second line lands at
            y300..315 - entirely off the screen, drawn and invisible. The text
-           is abbreviated instead: at montserrat_12 this is ~276px inside the
-           400px width, where the two-line version's first line alone was
-           313px and the single-line combination would have been 447px. */
-        lv_label_set_text_fmt(objects.sync,
-                               "Sync %02d.%02d %02d:%02d   Up %dd %dh   Rst: %s",
-                               t->tm_mday, t->tm_mon + 1,
-                               t->tm_hour, t->tm_min,
-                               uptime_days, uptime_hours,
-                               reset_reason_str());
+           is abbreviated instead: at montserrat_12 the widest form is ~332px
+           inside the 400px width, where the two-line version's first line
+           alone was 313px and the naive combination would have been 447px. */
+        if (s_last_sync_valid) {
+            lv_label_set_text_fmt(objects.sync,
+                                   "Sync %02d.%02d %02d:%02d   Up %dd %02dh %02dm   Rst: %s",
+                                   s_last_sync_tm.tm_mday, s_last_sync_tm.tm_mon + 1,
+                                   s_last_sync_tm.tm_hour, s_last_sync_tm.tm_min,
+                                   uptime_days, uptime_hours, uptime_mins,
+                                   reset_reason_str());
+        } else {
+            lv_label_set_text_fmt(objects.sync,
+                                   "Sync --.-- --:--   Up %dd %02dh %02dm   Rst: %s",
+                                   uptime_days, uptime_hours, uptime_mins,
+                                   reset_reason_str());
+        }
         Lvgl_Refresh();
         Lvgl_unlock();
     }
+}
+
+static void update_sync_label(const struct tm *t)
+{
+    s_last_sync_tm    = *t;
+    s_last_sync_valid = true;
+    refresh_sync_label();
 }
 
 static WeatherIcon classify_weathercode(int code)
@@ -621,6 +645,8 @@ static void clock_task(void *arg)
                    retries on the next cycle rather than every minute. */
                 last_weather_slot = weather_slot;
             }
+
+            refresh_sync_label();
 
             if (Shtc3_Read(&temperature, &humidity) != ESP_OK) {
                 ESP_LOGW(TAG, "Failed to read SHTC3, keeping previous values.");
