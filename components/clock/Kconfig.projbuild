@@ -1,0 +1,103 @@
+menu "Weather Clock"
+
+    menu "Wi-Fi"
+
+        config CLOCK_WIFI_SSID
+            string "Wi-Fi SSID"
+            default ""
+            help
+                Network the clock joins to sync time and fetch weather. Left
+                empty by default on purpose: this is a credential, and the
+                default is what a fresh clone builds with.
+
+        config CLOCK_WIFI_PASS
+            string "Wi-Fi password"
+            default ""
+            help
+                WPA2 passphrase for CLOCK_WIFI_SSID. Stored in sdkconfig,
+                which is deliberately not tracked by git.
+
+    endmenu
+
+    menu "Time"
+
+        config CLOCK_TIMEZONE
+            string "POSIX timezone string"
+            default "CET-1CEST,M3.5.0,M10.5.0/3"
+            help
+                Passed to setenv("TZ", ...). The default is Central European
+                Time with EU daylight-saving rules. Everything displayed is
+                local time; the RTC holds UTC.
+
+        config CLOCK_NTP_SERVER
+            string "NTP server"
+            default "pool.ntp.org"
+
+        config CLOCK_SYNC_HOUR_1
+            int "First daily time-sync hour"
+            range 0 23
+            default 5
+            help
+                The RTC drifts slowly, so it is disciplined twice a day rather
+                than on every Wi-Fi bring-up. Weather refreshes on its own,
+                shorter cycle and shares a bring-up when the two coincide.
+
+        config CLOCK_SYNC_HOUR_2
+            int "Second daily time-sync hour"
+            range 0 23
+            default 15
+
+    endmenu
+
+    menu "Weather"
+
+        config WEATHER_LATITUDE
+            string "Latitude"
+            default ""
+            help
+                Decimal degrees, as sent to Open-Meteo. Empty by default -
+                a location is personal data.
+
+        config WEATHER_LONGITUDE
+            string "Longitude"
+            default ""
+
+        config WEATHER_REFRESH_MIN
+            int "Weather refresh interval (minutes)"
+            range 5 720
+            default 30
+            help
+                A "current" temperature that is hours old is not a current
+                temperature. Each refresh costs one Wi-Fi bring-up: at 30
+                minutes that is roughly 13 mAh a day against a ~190 mAh
+                budget, taking runtime from about 14 days to about 13.
+
+        config WEATHER_STALE_CYCLES
+            int "Refresh cycles before data is marked stale"
+            range 1 20
+            default 3
+            help
+                How many consecutive failed refreshes before the top bar
+                shows the stale-data warning. One failure is a blip; three in
+                a row is an outage worth surfacing.
+
+    endmenu
+
+    menu "Battery"
+
+        config BATTERY_WARNING_MV
+            int "Low-battery warning threshold (mV)"
+            range 2500 4200
+            default 3200
+
+        config BATTERY_CRITICAL_MV
+            int "Critical shutdown threshold (mV)"
+            range 2500 4200
+            default 3100
+            help
+                Below this the device shuts down to protect the cell. Must be
+                lower than the warning threshold.
+
+    endmenu
+
+endmenu

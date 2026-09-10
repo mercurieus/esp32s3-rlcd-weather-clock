@@ -1,5 +1,4 @@
 #include "clock_task.h"
-#include "clock_config.h"
 #include "clock_time.h"
 #include "pcf85063.h"
 #include "shtc3.h"
@@ -25,19 +24,15 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <stdio.h>
-/* The RTC is disciplined twice a day - it drifts slowly and there is no
-   reason to spend WiFi on it more often. Weather is separate: a "current"
-   reading that is half a day old is not a current reading, so it refreshes
-   on its own, shorter cycle. Both share one WiFi bring-up when they happen
-   to fall together. */
-#define SYNC_HOUR_1 5
-#define SYNC_HOUR_2 15
-#define WEATHER_REFRESH_MIN 30
-/* Three missed refresh cycles before the reading is called stale - one
-   failure is a blip, three in a row is an outage worth showing. */
-#define WEATHER_STALE_US ((int64_t)WEATHER_REFRESH_MIN * 3 * 60 * 1000000LL)
-#define BATTERY_WARNING_MV  3200
-#define BATTERY_CRITICAL_MV 3100
+/* All tunable from menuconfig under "Weather Clock" - see
+   components/clock/Kconfig.projbuild for what each one costs. */
+#define SYNC_HOUR_1         CONFIG_CLOCK_SYNC_HOUR_1
+#define SYNC_HOUR_2         CONFIG_CLOCK_SYNC_HOUR_2
+#define WEATHER_REFRESH_MIN CONFIG_WEATHER_REFRESH_MIN
+#define WEATHER_STALE_US \
+    ((int64_t)WEATHER_REFRESH_MIN * CONFIG_WEATHER_STALE_CYCLES * 60 * 1000000LL)
+#define BATTERY_WARNING_MV  CONFIG_BATTERY_WARNING_MV
+#define BATTERY_CRITICAL_MV CONFIG_BATTERY_CRITICAL_MV
 static const char *TAG = "ClockTask";
 static const char *WEEKDAY_NAMES[7] = { "Su", "Mo", "Tu", "We", "Th", "Fr", "Sa" };
 static WeatherDay s_weather[4];
@@ -455,7 +450,7 @@ static void clock_task(void *arg)
 {
     set_status("Initializing...");
 
-    ClockTime_SetTimezone(CLOCK_TIMEZONE);
+    ClockTime_SetTimezone(CONFIG_CLOCK_TIMEZONE);
     WifiSync_Init();
     Pcf85063_Init((gpio_num_t)ESP32_I2C_SDA_PIN, (gpio_num_t)ESP32_I2C_SCL_PIN);
     Shtc3_Init(Pcf85063_GetBusHandle());
@@ -472,7 +467,7 @@ static void clock_task(void *arg)
 
     set_status("Connecting to WiFi...");
     ESP_LOGI(TAG, "First time and weather sync over WiFi...");
-    if (!WifiSync_SyncTimeOnce(&t_utc, CLOCK_WIFI_SSID, CLOCK_WIFI_PASS, 15000, wifi_connected_cb, s_weather)) {
+    if (!WifiSync_SyncTimeOnce(&t_utc, CONFIG_CLOCK_WIFI_SSID, CONFIG_CLOCK_WIFI_PASS, 15000, wifi_connected_cb, s_weather)) {
         ESP_LOGE(TAG, "No WiFi connection at startup - halting device.");
         set_status("Failed to connect to WiFi. Please reset the device.");
 
@@ -635,8 +630,8 @@ static void clock_task(void *arg)
                    the clock. */
                 struct tm ntp_utc;
                 set_sync_busy(true);
-                const bool ok = WifiSync_SyncTimeOnce(&ntp_utc, CLOCK_WIFI_SSID,
-                                                      CLOCK_WIFI_PASS, 15000,
+                const bool ok = WifiSync_SyncTimeOnce(&ntp_utc, CONFIG_CLOCK_WIFI_SSID,
+                                                      CONFIG_CLOCK_WIFI_PASS, 15000,
                                                       wifi_connected_cb, s_weather);
                 set_sync_busy(false);
                 if (ok && time_due) {
