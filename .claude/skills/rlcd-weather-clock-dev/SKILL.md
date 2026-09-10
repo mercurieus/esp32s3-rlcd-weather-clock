@@ -82,6 +82,34 @@ the settings screen carries the last `esp_reset_reason()` for that reason. UART0
 on TX 43 / RX 44 is the other escape hatch; see
 [references/board-hardware.md](references/board-hardware.md).
 
+## The host resets this board by opening the port
+
+Opening COM8 toggles the USB CDC control lines and **restarts the chip** -
+`rst:0x15 (USB_UART_CHIP_RESET)`, reported by `esp_reset_reason()` as
+`ESP_RST_USB`. Every `idf.py flash` ends the same way ("Hard resetting via RTS
+pin"), and so does any host-side serial monitor that opens the port, including
+an IDE extension polling in the background.
+
+**This has already been misdiagnosed once here as a firmware bug.** The board
+appeared to reboot on the half-hourly weather refresh; two fixes were shipped at
+the sync path before the reset reason showed `USB-host` and the cause turned out
+to be the host, not the firmware.
+
+Consequences worth remembering:
+
+- **A reset reason read over USB is contaminated.** It will say `USB-host`
+  whatever the real behaviour is, because the flash that installed the firmware
+  reset the board that way. It only means something after the board has run
+  undisturbed.
+- **Serial capture is not passive.** A script that opens the port to watch for a
+  crash causes a restart at the moment it opens - and then looks like evidence of
+  the crash it was meant to observe.
+- **The only clean test of "does it restart by itself" is on battery**, with USB
+  unplugged so no host can reach it. Read the result off the panel's status line,
+  which carries live uptime and the last reset reason for exactly this reason.
+- A plain USB charger does not do this - a charger sends no SOF packets and opens
+  no port. It is host software specifically.
+
 ## The panel is 1-bit - design for it
 
 `Lvgl_FlushCallback` thresholds RGB565 at `0x7fff`. There is no grey. 400x300
