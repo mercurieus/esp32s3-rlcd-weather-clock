@@ -90,10 +90,13 @@ Opening COM8 toggles the USB CDC control lines and **restarts the chip** -
 pin"), and so does any host-side serial monitor that opens the port, including
 an IDE extension polling in the background.
 
-**This has already been misdiagnosed once here as a firmware bug.** The board
-appeared to reboot on the half-hourly weather refresh; two fixes were shipped at
-the sync path before the reset reason showed `USB-host` and the cause turned out
-to be the host, not the firmware.
+**Host resets and a real firmware panic were present at the same time here**,
+which made both harder to see. The board appeared to reboot on the half-hourly
+weather refresh; the reset reason read `USB-host`, and that was taken as the
+whole answer. It was not - a later core dump showed a genuine panic underneath
+(`esp_timer_create` returning `ESP_ERR_NO_MEM` inside `phy_track_pll_init`
+during `esp_wifi_start()`). A contaminated reading does not mean there is
+nothing there; it means that reading cannot settle it either way.
 
 Consequences worth remembering:
 
@@ -104,6 +107,9 @@ Consequences worth remembering:
 - **Serial capture is not passive.** A script that opens the port to watch for a
   crash causes a restart at the moment it opens - and then looks like evidence of
   the crash it was meant to observe.
+- **Read the core dump, not the reset reason.** The coredump partition survives
+  the reboot and names the failing call; the reset reason alone cannot
+  distinguish a host reset from a panic whose reboot the host then re-triggered.
 - **The only clean test of "does it restart by itself" is on battery**, with USB
   unplugged so no host can reach it. Read the result off the panel's status line,
   which carries live uptime and the last reset reason for exactly this reason.
