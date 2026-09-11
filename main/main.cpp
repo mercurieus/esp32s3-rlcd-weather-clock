@@ -11,6 +11,7 @@
 #include "clock_time.h"
 #include "nav.h"
 #include "selftest.h"
+#include "wifi_stress.h"
 
 DisplayPort RlcdPort(12, 11, 5, 40, 41, LCD_WIDTH, LCD_HEIGHT);
 
@@ -75,6 +76,12 @@ extern "C" void app_main(void)
     ClockTime_RunTests();
     Nav_RunTests();
     Selftest_End();
+
+    /* Compiled out unless CONFIG_CLOCK_WIFI_STRESS is set. Runs here, in
+       the same place as the other suites, because it needs the whole
+       system up and must finish before ClockTask_Start() begins its own
+       Wi-Fi work. */
+    WifiStress_Run();
 
     RlcdPort.RLCD_Init();
     /* RLCD_Init() only memsets DispBuffer to white (RLCD_ColorClear) and
