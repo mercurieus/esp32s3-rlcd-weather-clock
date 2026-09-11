@@ -50,3 +50,11 @@ CONFIG_ESP_COREDUMP_STACK_SIZE=1280
 # Give the panic handler time to flush over USB CDC before it resets.
 CONFIG_ESP_SYSTEM_PANIC_REBOOT_DELAY_SECONDS=5
 
+# TLS buffers allocated per transfer instead of held for the life of the
+# connection. Measured on this board with the Wi-Fi stress test, 15 fetches:
+# minimum-ever free internal DRAM rose from 79712 to 96460 bytes, and the
+# largest free block during a fetch from ~46K to ~64K. The gain is almost
+# exactly MBEDTLS_SSL_IN_CONTENT_LEN, which is 16384 for a weather response
+# under 2 KB.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+
