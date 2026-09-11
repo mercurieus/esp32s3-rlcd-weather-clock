@@ -100,4 +100,30 @@ menu "Weather Clock"
 
     endmenu
 
+    menu "Diagnostics"
+
+        config CLOCK_WIFI_STRESS
+            bool "Run a Wi-Fi cycle stress test at boot"
+            default n
+            help
+                Runs back-to-back Wi-Fi bring-up/teardown cycles at boot and
+                reports how internal DRAM moves across each one, in two passes -
+                one without the weather fetch, one with - so a leak in the
+                HTTP/TLS path can be told from one in the radio path.
+
+                For hunting the ESP_ERR_NO_MEM abort inside phy_track_pll_init
+                that reboots the board after a few hours of normal refreshes.
+                At a few seconds per cycle this reproduces it in minutes.
+
+                Holds boot for a minute or two and hammers the access point.
+                Leave off except when investigating.
+
+        config CLOCK_WIFI_STRESS_CYCLES
+            int "Cycles per pass"
+            depends on CLOCK_WIFI_STRESS
+            range 2 200
+            default 15
+
+    endmenu
+
 endmenu
