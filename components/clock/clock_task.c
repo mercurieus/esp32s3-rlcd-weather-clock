@@ -20,6 +20,7 @@
 #include "esp_sleep.h"
 #include "esp_system.h"
 #include "esp_rom_sys.h"
+#include "esp_heap_caps.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -165,6 +166,16 @@ static void refresh_sync_label(void)
         int uptime_hours = (int)((uptime_sec % 86400) / 3600);
         int uptime_mins  = (int)((uptime_sec % 3600) / 60);
 
+        /* Internal DRAM specifically, not total free: the Wi-Fi PHY and
+           esp_timer allocate from internal memory, and it is an
+           esp_timer_create() returning ESP_ERR_NO_MEM inside phy_track_pll_init
+           that aborts and reboots the board. PSRAM being plentiful says
+           nothing about that. Current and minimum-ever are both shown -
+           minimum-ever is the one that matters, since the crash happens at a
+           trough that a once-a-minute sample will usually miss. */
+        int heap_now = (int)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
+        int heap_min = (int)(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024);
+
         /* One line, not two. This label sits at y285 on a 300px panel and
            montserrat_12's line_height is 15, so a second line lands at
            y300..315 - entirely off the screen, drawn and invisible. The text
@@ -173,18 +184,20 @@ static void refresh_sync_label(void)
            alone was 313px and the naive combination would have been 447px. */
         if (s_last_sync_valid) {
             lv_label_set_text_fmt(objects.sync,
-                                   "Sync %02d.%02d %02d:%02d   Up %dd %02dh %02dm   Rst: %s/%02x",
+                                   "Sync %02d.%02d %02d:%02d  Up %dd%02dh%02dm  R:%s/%02x  H %d/%dk",
                                    s_last_sync_tm.tm_mday, s_last_sync_tm.tm_mon + 1,
                                    s_last_sync_tm.tm_hour, s_last_sync_tm.tm_min,
                                    uptime_days, uptime_hours, uptime_mins,
                                    reset_reason_str(),
-                                   (unsigned)esp_rom_get_reset_reason(0));
+                                   (unsigned)esp_rom_get_reset_reason(0),
+                                   heap_now, heap_min);
         } else {
             lv_label_set_text_fmt(objects.sync,
-                                   "Sync --.-- --:--   Up %dd %02dh %02dm   Rst: %s/%02x",
+                                   "Sync --.-- --:--  Up %dd%02dh%02dm  R:%s/%02x  H %d/%dk",
                                    uptime_days, uptime_hours, uptime_mins,
                                    reset_reason_str(),
-                                   (unsigned)esp_rom_get_reset_reason(0));
+                                   (unsigned)esp_rom_get_reset_reason(0),
+                                   heap_now, heap_min);
         }
         Lvgl_Refresh();
         Lvgl_unlock();
@@ -637,12 +650,26 @@ static void clock_task(void *arg)
                    that is what the API does, but the RTC is only written on a
                    time_due tick - a weather refresh should not be able to jump
                    the clock. */
+                const size_t heap_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+
                 struct tm ntp_utc;
                 set_sync_busy(true);
                 const bool ok = WifiSync_SyncTimeOnce(&ntp_utc, CONFIG_CLOCK_WIFI_SSID,
                                                       CONFIG_CLOCK_WIFI_PASS, 15000,
                                                       wifi_connected_cb, s_weather);
                 set_sync_busy(false);
+
+                /* The per-cycle delta is the number that matters: the crash is
+                   internal DRAM running out during a Wi-Fi bring-up, so a
+                   figure that does not return to its previous level after
+                   teardown is the leak. */
+                const size_t heap_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+                ESP_LOGW(TAG,
+                         "sync heap: before %u after %u delta %ld, min-ever %u, largest block %u",
+                         (unsigned)heap_before, (unsigned)heap_after,
+                         (long)heap_after - (long)heap_before,
+                         (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+                         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
                 if (ok && time_due) {
                     Pcf85063_SetTime(&ntp_utc);
                     ClockTime_UtcToLocal(&ntp_utc, &now);
