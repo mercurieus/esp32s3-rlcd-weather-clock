@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Draw a simulation of the main clock face as an SVG.
+"""Draw simulations of the two screens - calendar and clock face - as SVGs.
 
 Not a screenshot. Every coordinate is read out of the UI source at run time, so
 the mockup follows the firmware rather than drifting away from it the way a
@@ -11,7 +11,7 @@ What it cannot reproduce is the panel's own character. The real display is
 rendered here by whatever the viewer has installed rather than by the embedded
 Saira and Montserrat. Glyph shapes are close, not exact.
 
-    python tools/render_screen_mockup.py [-o img/screen-simulated.svg]
+    python tools/render_screen_mockup.py [--out-dir img]
 """
 
 import argparse
@@ -50,7 +50,7 @@ COND = "Saira Condensed,Arial Narrow,Helvetica Neue,Impact,sans-serif"
 
 # Montserrat ships with LVGL; these metrics are stable and small enough to
 # state here rather than hunt for inside managed_components.
-MONT = {12: (15, 3), 16: (18, 3), 20: (22, 4)}
+MONT = {12: (15, 3), 14: (16, 3), 16: (18, 3), 20: (22, 4)}
 
 
 def read(path):
@@ -129,9 +129,26 @@ def cloud(cx, cy, scale=1.0):
                cx - w / 2, cy + 2 * scale, w, h, h / 2))
 
 
-def build():
+def preamble(aria, what):
+    """Bezel, panel and the crisp-edges group that everything else sits in."""
+    return "\n".join([
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-14 -14 %d %d" width="%d" '
+        'height="%d" role="img" aria-label="%s">'
+        % (W + 28, H + 28, (W + 28) * 2, (H + 28) * 2, aria),
+        '<title>ESP32-S3 RLCD weather clock - %s (simulated)</title>' % what,
+        '<rect x="-14" y="-14" width="%d" height="%d" rx="10" fill="#2b2b2b"/>' % (W + 28, H + 28),
+        # a reflective LCD is a shade off white, never paper white
+        '<rect x="0" y="0" width="%d" height="%d" fill="#eceae4"/>' % (W, H),
+        '<g shape-rendering="crispEdges">',
+    ])
+
+
+def top_bar():
+    """The five-slot bar, drawn on both screens because the firmware puts it on
+    lv_layer_top() - it is not part of either screen, it sits over all of them.
+    The calendar mockup left it out at first, which showed a screen the device
+    never displays."""
     overlay = read(UI / "overlay.c")
-    screens = read(UI / "screens.c")
 
     temp_x, rail_y = rail_pos(overlay, "s_temp")
     hum_x, _ = rail_pos(overlay, "s_hum")
@@ -149,6 +166,33 @@ def build():
     fill = (define(overlay, "BATT_FILL_X"), define(overlay, "BATT_FILL_Y"),
             define(overlay, "BATT_FILL_W"), define(overlay, "BATT_FILL_H"))
 
+    out = [
+        text(temp_x, rail_y, 20, SAMPLE["indoor"]),
+        text(hum_x, rail_y, 20, SAMPLE["humidity"]),
+        cloud(wicon_x + 12, wicon_y + 13),
+        text(out_x, rail_y, 20, SAMPLE["outdoor"]),
+    ]
+
+    # the aerial, which appears only while the link is genuinely up
+    sx, sy = sync_x + 3, rail_y + 19
+    out.append('<g fill="none" stroke="#000" stroke-width="2">'
+               '<path d="M%d %d a13 13 0 0 1 18 0"/><path d="M%d %d a8 8 0 0 1 10 0"/></g>'
+               '<circle cx="%d" cy="%d" r="2.5" fill="#000"/>'
+               % (sx, sy - 12, sx + 4, sy - 7, sx + 9, sy - 1))
+
+    out.append(text(volt_x, volt_y, 16, SAMPLE["battery"], anchor="end", box=volt_w))
+    out.append('<rect x="%d" y="%d" width="%d" height="%d" fill="none" stroke="#000" '
+               'stroke-width="2"/>' % body)
+    out.append('<rect x="%d" y="%d" width="%d" height="%d" fill="none" stroke="#000" '
+               'stroke-width="2"/>' % nub)
+    out.append('<rect x="%d" y="%d" width="%d" height="%d" fill="#000"/>'
+               % (fill[0], fill[1], round(fill[2] * SAMPLE["battery_pct"] / 100.0), fill[3]))
+    return out
+
+
+def build():
+    screens = read(UI / "screens.c")
+
     hh1 = obj_pos(screens, "clock_hh1")
     hh2 = obj_pos(screens, "clock_hh2")
     mm1 = obj_pos(screens, "clock_mm1")
@@ -160,35 +204,9 @@ def build():
 
     o = []
     a = o.append
-    a('<svg xmlns="http://www.w3.org/2000/svg" viewBox="-14 -14 %d %d" width="%d" '
-      'height="%d" role="img" aria-label="Simulated clock face reading %s:%s">'
-      % (W + 28, H + 28, (W + 28) * 2, (H + 28) * 2, SAMPLE["hh"], SAMPLE["mm"]))
-    a('<title>ESP32-S3 RLCD weather clock - main screen (simulated)</title>')
-    a('<rect x="-14" y="-14" width="%d" height="%d" rx="10" fill="#2b2b2b"/>' % (W + 28, H + 28))
-    # a reflective LCD is a shade off white, never paper white
-    a('<rect x="0" y="0" width="%d" height="%d" fill="#eceae4"/>' % (W, H))
-    a('<g shape-rendering="crispEdges">')
-
-    # ---- top bar --------------------------------------------------------
-    a(text(temp_x, rail_y, 20, SAMPLE["indoor"]))
-    a(text(hum_x, rail_y, 20, SAMPLE["humidity"]))
-    a(cloud(wicon_x + 12, wicon_y + 13))
-    a(text(out_x, rail_y, 20, SAMPLE["outdoor"]))
-
-    # the aerial, which appears only while the link is genuinely up
-    sx, sy = sync_x + 3, rail_y + 19
-    a('<g fill="none" stroke="#000" stroke-width="2">'
-      '<path d="M%d %d a13 13 0 0 1 18 0"/><path d="M%d %d a8 8 0 0 1 10 0"/></g>'
-      '<circle cx="%d" cy="%d" r="2.5" fill="#000"/>'
-      % (sx, sy - 12, sx + 4, sy - 7, sx + 9, sy - 1))
-
-    a(text(volt_x, volt_y, 16, SAMPLE["battery"], anchor="end", box=volt_w))
-    a('<rect x="%d" y="%d" width="%d" height="%d" fill="none" stroke="#000" stroke-width="2"/>'
-      % body)
-    a('<rect x="%d" y="%d" width="%d" height="%d" fill="none" stroke="#000" stroke-width="2"/>'
-      % nub)
-    a('<rect x="%d" y="%d" width="%d" height="%d" fill="#000"/>'
-      % (fill[0], fill[1], round(fill[2] * SAMPLE["battery_pct"] / 100.0), fill[3]))
+    a(preamble("Simulated clock face reading %s:%s" % (SAMPLE["hh"], SAMPLE["mm"]),
+               "main screen"))
+    o.extend(top_bar())
 
     # ---- face -----------------------------------------------------------
     baseline = hh1[1] + (big_lh - big_bl)
@@ -226,14 +244,140 @@ def build():
     return "\n".join(o) + "\n"
 
 
+CAL = {
+    "title": "September 2026",
+    "dow": ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"],
+    # Monday-first September 2026: one leading day from August, the rest
+    # trailing into October. Adjacent-month cells render a size down, which is
+    # how the firmware distinguishes them today.
+    "first_col": 1,      # the 1st falls on a Tuesday
+    "days_in_month": 30,
+    "lead_from": 31,     # 31 August
+    "today": 24,
+    "forecast": [("24/9 We", "12/4"), ("25/9 Th", "14/6"),
+                 ("26/9 Fr", "11/3"), ("27/9 Sa", "9/1")],
+    "quote": "The quote area fills the strip below the forecast, wrapped and centred.",
+    "hh": 19, "mm": 3, "ss": 41,
+}
+
+
+def build_calendar():
+    """The Cal+Clock screen: month grid, analogue dial, forecast, quote."""
+    import math
+
+    screens = read(UI / "screens.c")
+
+    def d(name):
+        m = re.search(r"#define\s+" + name + r"\s+(\d+)", screens)
+        if not m:
+            raise SystemExit("screens.c: no #define " + name)
+        return int(m.group(1))
+
+    col_x0, col_w, row_h = d("CAL_COL_X0"), d("CAL_COL_W"), d("CAL_ROW_H")
+    grid_y, rows, arrow_w = d("CAL_GRID_Y"), d("CAL_ROWS"), d("CAL_ARROW_W")
+    title_y, quote_y = d("CAL_TITLE_Y"), d("CAL_QUOTE_Y")
+    fc_y, fc_w, fc_text_x = d("CAL_FC_Y"), d("CAL_FC_W"), d("CAL_FC_TEXT_X")
+    clk_x, clk_y = d("CAL_CLOCK_X"), d("CAL_CLOCK_Y")
+    centre, radius = d("CLOCK_CENTER"), d("CLOCK_RADIUS")
+    grid_w = col_w * 7
+    grid_bottom = grid_y + (rows + 1) * row_h
+
+    o = []
+    a = o.append
+    a(preamble("Simulated calendar and clock screen", "calendar screen"))
+    o.extend(top_bar())
+
+    # ---- title row, with the month arrows --------------------------------
+    for x, glyph in ((col_x0, "<"), (col_x0 + grid_w - arrow_w, ">")):
+        a('<rect x="%d" y="%d" width="%d" height="%d" fill="none" stroke="#000" '
+          'stroke-width="2"/>' % (x, title_y, arrow_w, arrow_w))
+        a(text(x, title_y + 1, 14, glyph, anchor="middle", box=arrow_w))
+    a(text(col_x0 + arrow_w, title_y, 16, CAL["title"], anchor="middle",
+           box=grid_w - 2 * arrow_w))
+
+    # ---- weekday header and the rule under it ----------------------------
+    for c, name in enumerate(CAL["dow"]):
+        a(text(col_x0 + c * col_w, grid_y, 14, name, anchor="middle", box=col_w))
+    a('<line x1="%d" y1="%d" x2="%d" y2="%d" stroke="#000" stroke-width="2"/>'
+      % (col_x0, grid_y + row_h - 4, col_x0 + grid_w, grid_y + row_h - 4))
+
+    # ---- day cells -------------------------------------------------------
+    for r in range(rows):
+        for c in range(7):
+            n = r * 7 + c - CAL["first_col"] + 1
+            cx = col_x0 + c * col_w
+            cy = grid_y + (r + 1) * row_h
+            if n < 1:
+                label, size = str(CAL["lead_from"] + n), 12
+            elif n > CAL["days_in_month"]:
+                label, size = str(n - CAL["days_in_month"]), 12
+            else:
+                label, size = str(n), 14
+            if size == 14 and n == CAL["today"]:
+                # today's box is sized from the same constants as the columns,
+                # so it always lands exactly on a cell
+                a('<rect x="%d" y="%d" width="%d" height="%d" fill="none" '
+                  'stroke="#000" stroke-width="2"/>' % (cx, cy - 2, col_w, row_h))
+            a(text(cx, cy, size, label, anchor="middle", box=col_w))
+
+    # ---- analogue dial ---------------------------------------------------
+    ccx, ccy = clk_x + centre, clk_y + centre
+    a('<circle cx="%d" cy="%d" r="%d" fill="none" stroke="#000" stroke-width="2"/>'
+      % (ccx, ccy, radius))
+    for i in range(12):
+        ang = math.radians(i * 30)
+        x1 = ccx + (radius - 12) * math.sin(ang)
+        y1 = ccy - (radius - 12) * math.cos(ang)
+        a('<rect x="%.1f" y="%.1f" width="5" height="5" fill="#000"/>' % (x1 - 2.5, y1 - 2.5))
+    for i in range(60):
+        if i % 5 == 0:
+            continue
+        ang = math.radians(i * 6)
+        x1 = ccx + (radius - 4) * math.sin(ang)
+        y1 = ccy - (radius - 4) * math.cos(ang)
+        # the firmware dithers these to a mid-grey; on a 1-bit panel that is a
+        # checkerboard, which at this size reads as grey
+        a('<rect x="%.1f" y="%.1f" width="3" height="3" fill="#9a9a9a"/>' % (x1 - 1.5, y1 - 1.5))
+    # Lengths and widths are update_clock_hands()'s own: 37/5 for the hour,
+    # 55/3 for the minute, 62/2 for the second, and a 9px square hub rather
+    # than a disc.
+    hands = (
+        ((CAL["hh"] % 12) * 30 + CAL["mm"] * 0.5, 37, 5),
+        (CAL["mm"] * 6, 55, 3),
+        (CAL["ss"] * 6, 62, 2),
+    )
+    for deg, length, width in hands:
+        ang = math.radians(deg)
+        a('<line x1="%d" y1="%d" x2="%.1f" y2="%.1f" stroke="#000" stroke-width="%d"/>'
+          % (ccx, ccy, ccx + length * math.sin(ang), ccy - length * math.cos(ang), width))
+    a('<rect x="%d" y="%d" width="9" height="9" fill="#000"/>' % (ccx - 4, ccy - 4))
+
+    # ---- forecast strip and quote ----------------------------------------
+    a('<line x1="0" y1="%d" x2="%d" y2="%d" stroke="#000" stroke-width="2"/>'
+      % (grid_bottom + 4, W, grid_bottom + 4))
+    for i, day in enumerate(CAL["forecast"]):
+        x = i * fc_w
+        a(cloud(x + 18, fc_y + 18, scale=1.5))
+        a(text(x + fc_text_x, fc_y, 14, day[0]))
+        a(text(x + fc_text_x, fc_y + 16, 14, day[1]))
+    a('<line x1="0" y1="%d" x2="%d" y2="%d" stroke="#000" stroke-width="2"/>'
+      % (quote_y - 4, W, quote_y - 4))
+    a(text(2, quote_y + 6, 12, CAL["quote"], anchor="middle", box=396, length=384))
+
+    a("</g></svg>")
+    return "\n".join(o) + "\n"
+
+
 def main():
-    ap = argparse.ArgumentParser(description="Render the simulated clock face.")
-    ap.add_argument("-o", "--out", default=str(ROOT / "img" / "screen-simulated.svg"))
+    ap = argparse.ArgumentParser(description="Render the simulated screens.")
+    ap.add_argument("--out-dir", default=str(ROOT / "img"))
     args = ap.parse_args()
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(build(), encoding="utf-8")
-    print("wrote " + str(out))
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for name, svg in (("screen-simulated.svg", build()),
+                      ("screen-calendar-simulated.svg", build_calendar())):
+        (out_dir / name).write_text(svg, encoding="utf-8")
+        print("wrote " + str(out_dir / name))
     return 0
 
 
