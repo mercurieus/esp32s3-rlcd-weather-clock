@@ -222,6 +222,40 @@ look at: a time with an `8` beside the colon, the widest date, a full battery.
 - A reboot and a brownout look identical from the outside. `esp_reset_reason()`
   separates them and they need opposite fixes; get it before proposing either.
 
+## Measuring a heap leak without inventing one
+
+Heap tracing found a leak here that did not exist, and the measurement looked
+clean for three runs before the artifact showed itself.
+
+- **`heap_trace_stop()` must come after any settle, not before it.**
+  `HEAP_TRACE_LEAKS` clears a record only when it *observes* the matching
+  `free`. Stop the tracer, then wait for connections to close, and every one of
+  those frees is invisible - normal TIME_WAIT sockets are reported as leaks,
+  with a call stack, at any settle length.
+- **If the number does not move when you change the measurement, suspect the
+  measurement.** Extending the settle 90s -> 200s left the count at exactly one
+  208-byte PCB per fetch both times. That was read as confirmation. It was the
+  opposite: a real timing effect moves with timing, an artifact does not.
+- **Ground-truth a heap claim against the subsystem's own bookkeeping.** lwIP
+  keeps `tcp_active_pcbs`, `tcp_tw_pcbs` and `tcp_bound_pcbs`; walking them
+  settled in one run what three heap traces got wrong. A PCB on none of those
+  lists is freed, whatever the trace says. `wifi_stress.c` has the walker.
+- **A per-fetch decline during a burst is not a leak.** Fetches four seconds
+  apart hold every TIME_WAIT PCB at once (2 x `CONFIG_LWIP_TCP_MSL` = 120s), so
+  free memory falls a clean ~212 B per fetch and looks exactly like one. At the
+  real 30-minute interval they never coexist. Compare totals at two very
+  different fetch counts: the one-time allocations here were identical at 4 and
+  15 fetches (23 allocations, 768 B), which is what "not accumulating" looks
+  like.
+- **A backtrace cannot cross a thread boundary.** `netconn_new` posts a message
+  and lwIP's `tcpip` thread allocates, so the stack ends at `tcpip_thread` no
+  matter how large `CONFIG_HEAP_TRACING_STACK_DEPTH` is. Raising the depth was
+  wasted builds; recognising the boundary was the answer.
+- `MEMP_MEM_MALLOC` is 1 in ESP-IDF, so lwIP's pools are heap-backed and
+  `CONFIG_LWIP_MAX_ACTIVE_TCP` is **not** a cap. A genuine PCB leak would grow
+  until the heap died rather than failing at 16 - so "it never failed to
+  connect" does not rule a leak out, and socket-count health does not either.
+
 ## Never burn eFuses
 
 **Do not run `espefuse` in write mode. Do not enable Secure Boot or Flash
