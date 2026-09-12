@@ -227,6 +227,29 @@ def check_top_bar(errors):
                 f"next slot at x{next_x}"
             )
 
+    # The status slot carries four different glyphs now, one per link state,
+    # and the widest is not the one the code happens to start with. Measured
+    # against the battery slot that follows it.
+    link_glyphs = {
+        "OK (idle, fresh)":      "",
+        "WARNING (idle, stale)": "",
+        "REFRESH (connecting)":  "",
+        "WIFI (connected)":      "",
+    }
+    sync_x = slot_x("s_sync")
+    m_batt = re.search(r"s_battery_volts\s*=\s*overlay_label\(top,\s*(\d+)", overlay)
+    if m_batt:
+        batt_x = int(m_batt.group(1))
+        for name, glyph in link_glyphs.items():
+            gw = f20.widths.get(glyph)
+            if gw is None:
+                errors.append(f"status slot glyph {name} is missing from montserrat_20")
+            elif sync_x + gw > batt_x:
+                errors.append(
+                    f"status slot {name} is {gw}px from x{sync_x}, past the "
+                    f"battery slot at x{batt_x}"
+                )
+
     # battery voltage is montserrat_16 in a fixed-width right-aligned box
     f16 = font(16)
     volts = [f"{v // 100}.{v % 100:02d}" for v in range(300, 421)]

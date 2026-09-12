@@ -13,7 +13,7 @@ static lv_obj_t *s_hum_trend;
 static lv_obj_t *s_weather_icon;
 static lv_obj_t *s_outdoor;
 static lv_obj_t *s_sync;
-static bool      s_sync_busy;
+static OverlayLinkState s_link = OVERLAY_LINK_IDLE;
 static lv_obj_t *s_battery_volts;
 static lv_obj_t *s_battery_fill;
 static lv_obj_t *s_battery_bolt;
@@ -323,8 +323,11 @@ void Overlay_SetTopBar(const char *temp, const char *hum,
     lv_label_set_text(s_hum, hum);
     /* A sync in progress owns the slot: it is the more useful thing to say,
        and the reading is about to be replaced anyway. */
-    if (!s_sync_busy) {
-        lv_label_set_text(s_sync, data_stale ? LV_SYMBOL_WARNING : LV_SYMBOL_WIFI);
+    /* Only while the radio is down. The connecting and connected glyphs are
+       painted from the Wi-Fi event loop and are the truth at that instant; a
+       routine tick has no business overwriting them. */
+    if (s_link == OVERLAY_LINK_IDLE) {
+        lv_label_set_text(s_sync, data_stale ? LV_SYMBOL_WARNING : LV_SYMBOL_OK);
     }
     lv_label_set_text(s_battery_volts, battery_volts);
 
@@ -359,18 +362,25 @@ void Overlay_SetTopBar(const char *temp, const char *hum,
     }
 }
 
-void Overlay_SetSyncBusy(bool busy)
+void Overlay_SetLinkState(OverlayLinkState state)
 {
     if (!s_sync) {
         return;
     }
-    s_sync_busy = busy;
-    if (busy) {
+    s_link = state;
+    switch (state) {
+    case OVERLAY_LINK_CONNECTING:
         lv_label_set_text(s_sync, LV_SYMBOL_REFRESH);
+        break;
+    case OVERLAY_LINK_CONNECTED:
+        lv_label_set_text(s_sync, LV_SYMBOL_WIFI);
+        break;
+    case OVERLAY_LINK_IDLE:
+    default:
+        /* Returning to idle does not paint here: the next Overlay_SetTopBar
+           knows whether the data ended up stale, and this function does not. */
+        break;
     }
-    /* Leaving busy does not clear the slot here - the next Overlay_SetTopBar
-       decides between the stale warning and nothing, which is the same
-       decision it makes at every other tick. */
 }
 
 void Overlay_ShowFocus(const lv_area_t *area)

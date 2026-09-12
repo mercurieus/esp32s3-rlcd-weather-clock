@@ -74,6 +74,25 @@ esp_err_t Pcf85063_SetTime(const struct tm *t)
     return err;
 }
 
+esp_err_t Pcf85063_TimeIsValid(bool *valid)
+{
+    if (!s_dev) return ESP_ERR_INVALID_STATE;
+    if (!valid) return ESP_ERR_INVALID_ARG;
+
+    uint8_t reg = REG_SECONDS;
+    uint8_t v = 0;
+    esp_err_t err = i2c_master_transmit_receive(s_dev, &reg, 1, &v, 1, 1000);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read the RTC seconds register: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    /* Bit 7 is OS. Pcf85063_GetTime() masks it off to read the seconds, which
+       is correct there and is why it has to be read separately here. */
+    *valid = (v & 0x80) == 0;
+    return ESP_OK;
+}
+
 esp_err_t Pcf85063_GetTime(struct tm *t)
 {
     if (!s_dev) return ESP_ERR_INVALID_STATE;
