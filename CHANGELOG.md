@@ -7,9 +7,11 @@ Dates are when the work landed on the branch, not when it was released.
 
 ## [Unreleased] — the `calendar-screen-rework` branch
 
-97 commits. The display and reliability work is finished and hardware-verified;
-one investigation is explicitly unfinished and is listed under
-[Known issues](#known-issues).
+99 commits. The display and reliability work is finished and
+hardware-verified. The reboot that ran through most of this branch's history is
+found and fixed — see **Fixed**, first entry — and nothing is left under
+[Known issues](#known-issues). One display path remains
+[Unverified](#unverified) because reproducing it needs a real power cycle.
 
 ### Added
 
@@ -88,6 +90,29 @@ are now drawn from the layout constants, so they cannot quietly go stale.
 
 ### Fixed
 
+**The clock tick leaked 32 bytes a second, and that was the reboot.**
+`ClockTime_UtcToEpoch` took a UTC epoch out of newlib the obvious way —
+`setenv("TZ","UTC0")`, `mktime`, `setenv` back — and newlib reallocates the
+environment entry whenever the replacement value is longer, leaking the old
+buffer. The main loop converts once a second: 2160 B/minute, measured flat over
+fourteen minutes. That is ~130 KB an hour, so the heap emptied in about an hour
+and then sat at the floor; at the next Wi-Fi bring-up a ~60 byte
+`MALLOC_CAP_INTERNAL` allocation failed inside `phy_track_pll_init`, where IDF's
+`ESP_ERROR_CHECK` aborts and reboots the board.
+
+Replaced with `days_from_civil` — pure arithmetic, no libc state, no
+allocation. Not by preference: this toolchain has no `timegm` in its headers or
+its `libc.a`, and picolibc ships it only under `test/`. Checked against
+reference `timegm` before flashing, including the value the self-test pins, a
+leap day and the 2038 boundary. Verified after: thirteen consecutive minutes at
++0 bytes.
+
+Every earlier hunt missed it because they all tested the fetch path, which is
+clean. The leak was in the per-minute UI tick — the surface `wifi_stress.c`
+never touched. The `alloc_watch` guard added earlier in this branch is what made
+it findable: it converted the reboot into a stale reading, so the evidence
+survived.
+
 **A failed sync no longer bricks the clock.** It used to spin forever on
 "Please reset the device" — a flat access point, a slow DHCP lease or one
 low-memory moment left a dead-looking board waiting for a button this hardware
@@ -129,27 +154,9 @@ not happen.
 
 ### Known issues
 
-**The `ESP_ERR_NO_MEM` abort inside `phy_track_pll_init` is real and currently
-unexplained.** A core dump proves it: `esp_timer_create()` fails during
-`esp_wifi_start()`, and IDF's own `ESP_ERROR_CHECK` aborts. The allocation is
-about 60 bytes of `MALLOC_CAP_INTERNAL`, which the 8 MB of PSRAM cannot cover.
-
-What changed during this branch is that the *explanation* was wrong. A heap
-trace appeared to show one 208-byte lwIP TCP PCB leaking per weather fetch. It
-did not: `heap_trace_stop()` ran before the settle, and `HEAP_TRACE_LEAKS` only
-clears a record when it observes the matching free, so normal `TIME_WAIT`
-sockets were reported as leaks at every settle length. Moving one line took the
-count from 4 to 0 on identical firmware. See `34702d3`.
-
-So the fetch path does not leak, the radio path does not leak, and there is no
-mechanism for the abort yet. `alloc_watch` now records the heap across the
-reboot, so the next occurrence reports its own cause.
-
-`TODO.md` carries the one open lead: free internal DRAM fell ~1.8 KB per
-*failed* Wi-Fi connect across five cycles — the one path the stress testing
-never exercised. Written down with numbers and method rather than acted on,
-because it has not been given a settle window, and that omission is exactly what
-produced the phantom leak above.
+None outstanding. The `ESP_ERR_NO_MEM` abort inside `phy_track_pll_init` that
+this branch carried as unexplained was found and fixed on 2026-09-12 — see
+**Fixed: the clock tick leaked 32 bytes a second** below.
 
 ### Unverified
 
