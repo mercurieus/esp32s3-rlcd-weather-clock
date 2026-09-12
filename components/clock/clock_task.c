@@ -6,6 +6,9 @@
 #include "weather.h"
 #include "wifi_sync.h"
 #include "alloc_watch.h"
+#if CONFIG_HEAP_TRACING_STANDALONE
+#include "esp_heap_trace.h"
+#endif
 #include "lvgl_bsp.h"
 #include "screens.h"
 #include "ui.h"
@@ -722,6 +725,54 @@ static void clock_task(void *arg)
 
         if (now.tm_min != last_minute) {
             last_minute = now.tm_min;
+
+#if CONFIG_HEAP_TRACING_STANDALONE
+            /* Trace a handful of ticks and dump what they did not give back.
+               The rate is ~2160 B a minute and dead steady, so five minutes is
+               plenty to name the call site. Armed on the first tick rather
+               than at boot, so the dump is not buried under start-up
+               allocations, and stopped only after the window closes - the
+               other way round is what invented a leak earlier. */
+            {
+                #define TICK_TRACE_RECORDS 512
+                #define TICK_TRACE_MINUTES 5
+                static heap_trace_record_t s_tick_trace[TICK_TRACE_RECORDS];
+                static int s_tick_n = 0;
+
+                s_tick_n++;
+                if (s_tick_n == 1) {
+                    ESP_ERROR_CHECK(heap_trace_init_standalone(s_tick_trace, TICK_TRACE_RECORDS));
+                    ESP_ERROR_CHECK(heap_trace_start(HEAP_TRACE_LEAKS));
+                    ESP_LOGW(TAG, "tick trace armed for %d minutes", TICK_TRACE_MINUTES);
+                } else if (s_tick_n == TICK_TRACE_MINUTES + 1) {
+                    heap_trace_stop();
+                    /* Dumping a few hundred records over USB serial holds the CPU
+                       long enough to trip the interrupt watchdog - it did here.
+                       Keep the window short, and expect the reboot. */
+                    ESP_LOGW(TAG, "==== outstanding across %d ticks ====", TICK_TRACE_MINUTES);
+                    heap_trace_dump();
+                    ESP_LOGW(TAG, "==== end of tick dump ====");
+                }
+            }
+#endif
+
+            /* Per-minute heap, with the delta since the previous minute.
+               An RTC record showed 295 bytes free before a bring-up at 4h
+               uptime while a fetch measured either side of a sync moved
+               nothing, so whatever consumes the heap here does it with time
+               rather than with syncs - and a rate is the only thing that says
+               where to look. Cheap enough to leave in. */
+            {
+                static size_t last_free;
+                const size_t free_now = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+                ESP_LOGW(TAG, "tick %02d:%02d heap %u (%+ld since last minute), "
+                              "largest %u, min-ever %u",
+                         now.tm_hour, now.tm_min, (unsigned)free_now,
+                         last_free ? (long)free_now - (long)last_free : 0L,
+                         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                         (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+                last_free = free_now;
+            }
 
             const int weather_slot =
                 (now.tm_hour * 60 + now.tm_min) / WEATHER_REFRESH_MIN;
