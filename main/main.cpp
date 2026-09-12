@@ -12,6 +12,7 @@
 #include "nav.h"
 #include "selftest.h"
 #include "wifi_stress.h"
+#include "alloc_watch.h"
 
 DisplayPort RlcdPort(12, 11, 5, 40, 41, LCD_WIDTH, LCD_HEIGHT);
 
@@ -68,6 +69,11 @@ static void Lvgl_FlushCallback(lv_display_t *drv, const lv_area_t *area, uint8_t
 
 extern "C" void app_main(void)
 {
+    /* First, so the allocation-failure hook is armed before anything large is
+       allocated, and so the previous run's record is rescued out of RTC memory
+       before anything can overwrite it. */
+    AllocWatch_Init();
+
     /* main.cpp orchestrates every *_RunTests() suite directly: it is the
        one place already required by everything, which keeps components
        under test depending on selftest rather than the reverse. See the

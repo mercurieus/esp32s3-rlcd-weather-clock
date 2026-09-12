@@ -5,6 +5,7 @@
 #include "battery.h"
 #include "weather.h"
 #include "wifi_sync.h"
+#include "alloc_watch.h"
 #include "lvgl_bsp.h"
 #include "screens.h"
 #include "ui.h"
@@ -105,7 +106,7 @@ static void set_status(const char *text)
    (SW_CPU_RESET) and brownout are the two candidates for the reboot seen on
    weather refresh, and they need completely different fixes, so telling them
    apart is the whole point. */
-static const char *reset_reason_str(void)
+static const char *reset_reason_base(void)
 {
     switch (esp_reset_reason()) {
     case ESP_RST_POWERON:  return "power-on";
@@ -137,6 +138,22 @@ static const char *reset_reason_str(void)
     }
 }
 
+/* A restart caused by running out of memory and any other panic are the same
+   reset reason to the ROM, so the star is the only thing that tells them apart
+   on the panel. One character, because the status line has 11px of slack at
+   its widest and tools/verify_calendar_layout.py fails the build if that goes
+   negative. The numbers behind it go to the log at boot. */
+static const char *reset_reason_str(void)
+{
+    const char *base = reset_reason_base();
+    if (!AllocWatch_PreviousBootFailed()) {
+        return base;
+    }
+    static char marked[20];
+    snprintf(marked, sizeof(marked), "%s*", base);
+    return marked;
+}
+
 /* The sync runs inline on this task and blocks it for seconds at a time, so
    the indicator has to be painted before the call and left for the next tick
    to clear - nothing else gets to run in between. */
@@ -153,6 +170,11 @@ static void set_sync_busy(bool busy)
    is not itself a sync. Zeroed until the first one, which prints as --.--. */
 static struct tm s_last_sync_tm;
 static bool      s_last_sync_valid;
+/* Set when the startup sync could not reach NTP, so the RTC still holds
+   whatever it was carrying. It makes the next scheduled bring-up write the
+   clock even outside the twice-daily sync hours - otherwise a boot that
+   missed the network would keep a wrong time until 05:00 or 15:00. */
+static bool      s_time_unsynced;
 
 /* Redraws the bottom status line. Called every minute rather than only on a
    sync, so the uptime it shows is live: an uptime that only advanced twice an
@@ -489,20 +511,30 @@ static void clock_task(void *arg)
 
     set_status("Connecting to WiFi...");
     ESP_LOGI(TAG, "First time and weather sync over WiFi...");
-    if (!WifiSync_SyncTimeOnce(&t_utc, CONFIG_CLOCK_WIFI_SSID, CONFIG_CLOCK_WIFI_PASS, 15000, wifi_connected_cb, s_weather)) {
-        ESP_LOGE(TAG, "No WiFi connection at startup - halting device.");
-        set_status("Failed to connect to WiFi. Please reset the device.");
+    if (WifiSync_SyncTimeOnce(&t_utc, CONFIG_CLOCK_WIFI_SSID, CONFIG_CLOCK_WIFI_PASS, 15000, wifi_connected_cb, s_weather)) {
+        Pcf85063_SetTime(&t_utc);          /* the RTC now holds UTC */
+        ClockTime_UtcToLocal(&t_utc, &t);  /* everything displayed is local */
+        set_status("Time synced.");
+        update_sync_label(&t);
+        ESP_LOGI(TAG, "RTC set from NTP.");
+    } else {
+        /* A missed sync is not a reason to stop being a clock. This used to
+           spin here forever showing "Please reset the device", which made a
+           flat access point, a slow DHCP lease or a moment of low memory
+           indistinguishable from a dead board - and needed a human to press a
+           button the board does not have.
 
-        for (;;) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
+           The PCF85063 is battery-backed and keeps running across resets, so
+           the time is still good; the main loop reads it every cycle and never
+           needed this sync at all. Weather refreshes retry on their own slot,
+           so the network gets another chance within WEATHER_REFRESH_MIN. */
+        s_time_unsynced = true;
+        ESP_LOGW(TAG, "Startup sync failed - running on the RTC, retrying on the next slot.");
+        set_status("No network - using the RTC clock.");
+        if (Pcf85063_GetTime(&t_utc) == ESP_OK) {
+            ClockTime_UtcToLocal(&t_utc, &t);
         }
     }
-
-    Pcf85063_SetTime(&t_utc);          /* the RTC now holds UTC */
-    ClockTime_UtcToLocal(&t_utc, &t);  /* everything displayed is local */
-    set_status("Time synced.");
-    update_sync_label(&t);
-    ESP_LOGI(TAG, "RTC set from NTP.");
 
     float temperature = 0.0f, humidity = 0.0f;
     int battery_mv = 0;
@@ -514,6 +546,22 @@ static void clock_task(void *arg)
 
     ESP_LOGW(TAG, "Boot: last reset reason = %s (raw 0x%02x)",
              reset_reason_str(), (unsigned)esp_rom_get_reset_reason(0));
+
+    /* What the core dump cannot say. The dump stores task stacks only, so an
+       ESP_ERR_NO_MEM abort names the failing call and nothing about the heap
+       that failed it. This is that missing half, carried across the restart in
+       RTC memory. Logged at boot and again after every sync, because serial is
+       not a channel that can be relied on here - opening the port resets the
+       board, so a host is rarely attached at the moment that matters. */
+    AllocWatchRecord prev;
+    if (AllocWatch_PreviousBoot(&prev) && (prev.fail_count || prev.snap_tag)) {
+        ESP_LOGW(TAG, "Boot: previous run had %u failed alloc(s), last %u B caps 0x%03x; "
+                      "heap before '%s' at up %us: free %u largest %u min-ever %u",
+                 (unsigned)prev.fail_count, (unsigned)prev.fail_size,
+                 (unsigned)prev.fail_caps, AllocWatch_TagName(prev.snap_tag),
+                 (unsigned)prev.snap_uptime_s, (unsigned)prev.snap_free,
+                 (unsigned)prev.snap_largest, (unsigned)prev.snap_min_ever);
+    }
 
     set_status("Starting...");
     vTaskDelay(pdMS_TO_TICKS(800));
@@ -632,14 +680,21 @@ static void clock_task(void *arg)
         if (now.tm_min != last_minute) {
             last_minute = now.tm_min;
 
-            const bool is_sync_hour =
-                (now.tm_hour == SYNC_HOUR_1 || now.tm_hour == SYNC_HOUR_2);
-            const bool time_due =
-                is_sync_hour && now.tm_min == 0 && last_sync_hour != now.tm_hour;
-
             const int weather_slot =
                 (now.tm_hour * 60 + now.tm_min) / WEATHER_REFRESH_MIN;
             const bool weather_due = (weather_slot != last_weather_slot);
+
+            const bool is_sync_hour =
+                (now.tm_hour == SYNC_HOUR_1 || now.tm_hour == SYNC_HOUR_2);
+            /* An unsynced clock rides the weather slot rather than asking for
+               a bring-up of its own. Forcing time_due on its own turned a
+               missed startup sync into a Wi-Fi attempt every single minute -
+               measured, not theorised - which is a flat battery and an
+               annoyed access point. The radio is already coming up on that
+               slot, so this costs nothing extra. */
+            const bool time_due =
+                (is_sync_hour && now.tm_min == 0 && last_sync_hour != now.tm_hour) ||
+                (s_time_unsynced && weather_due);
 
             if (time_due || weather_due) {
                 ESP_LOGI(TAG, "Scheduled sync at %02d:%02d (%s)...",
@@ -670,9 +725,24 @@ static void clock_task(void *arg)
                          (long)heap_after - (long)heap_before,
                          (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
                          (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+
+                /* Repeated here, not just at boot, so attaching serial hours
+                   later still recovers it. Attaching resets the board, which
+                   destroys the RTC record's usefulness for that run - but the
+                   next sync reprints what the previous run recorded. */
+                if (AllocWatch_PreviousBootFailed()) {
+                    AllocWatchRecord prev;
+                    AllocWatch_PreviousBoot(&prev);
+                    ESP_LOGW(TAG, "previous run died on a %u B alloc (caps 0x%03x); "
+                                  "heap before '%s': free %u largest %u",
+                             (unsigned)prev.fail_size, (unsigned)prev.fail_caps,
+                             AllocWatch_TagName(prev.snap_tag),
+                             (unsigned)prev.snap_free, (unsigned)prev.snap_largest);
+                }
                 if (ok && time_due) {
                     Pcf85063_SetTime(&ntp_utc);
                     ClockTime_UtcToLocal(&ntp_utc, &now);
+                    s_time_unsynced = false;
                 }
                 /* The label says "last weather sync", so it has to follow the
                    weather cycle, not the twice-daily time sync it used to
