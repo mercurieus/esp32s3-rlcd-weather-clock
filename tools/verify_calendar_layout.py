@@ -252,8 +252,12 @@ def check_status_line(errors):
     reasons = ["power-on", "ext-pin", "sw-restart", "PANIC", "INT-WDT", "TASK-WDT",
                "WDT", "deepsleep", "BROWNOUT", "sdio", "USB-host", "jtag",
                "efuse-err", "PWR-GLITCH", "CPU-LOCKUP", "unknown"]
+    # Any reason can carry a trailing "*", which clock_task.c appends when the
+    # previous run recorded a failed allocation. It is one character, and this
+    # line had 11px of slack before it existed, so it is measured, not assumed.
     samples = [
-        f"Sync 30.09 23:59  Up 88d23h59m  R:{r}/17  H 188/188k" for r in reasons
+        f"Sync 30.09 23:59  Up 88d23h59m  R:{r}{star}/17  H 188/188k"
+        for r in reasons for star in ("", "*")
     ]
     w, sample = f12.widest(samples)
     if w > SCREEN_W:

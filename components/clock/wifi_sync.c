@@ -1,5 +1,12 @@
 #include "wifi_sync.h"
 
+/* Explicitly, and before anything that reads a CONFIG_ macro. An undefined
+   CONFIG_ symbol is silently 0 to the preprocessor, which once compiled a
+   whole diagnostic out of this project without a single warning. */
+#include "sdkconfig.h"
+
+#include "alloc_watch.h"
+#include "esp_heap_caps.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
@@ -90,6 +97,29 @@ bool WifiSync_SyncTimeOnce(struct tm *out_time, const char *ssid, const char *pa
        anyway, but this function runs again on every refresh, and by then a
        transient error is something to report and retry, not to die on. A
        failed refresh should cost a stale reading, not an uptime. */
+    /* The last look at the heap before the radio comes up. If the restart
+       happens inside esp_wifi_start(), this is what the next boot reports -
+       the core dump cannot supply it, because it stores task stacks and no
+       heap at all. */
+    AllocWatch_Snapshot(ALLOC_WATCH_TAG_WIFI_START);
+
+    /* A plain if, not #if: an undefined CONFIG_ symbol would make the
+       preprocessor form vanish silently, while this one fails to compile. The
+       comparison folds away when the floor is 0. */
+    const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    if (CONFIG_CLOCK_MIN_HEAP_FOR_WIFI > 0 &&
+        free_internal < (size_t)CONFIG_CLOCK_MIN_HEAP_FOR_WIFI) {
+        /* Refusing here is the whole point. Bring-up costs ~49 KB of internal
+           DRAM, and running out part-way through lands in phy_track_pll_init(),
+           where IDF's own ESP_ERROR_CHECK aborts and reboots the board over a
+           ~60 byte allocation. Declining the refresh costs a stale reading. */
+        ESP_LOGE(TAG, "skipping bring-up: %u B internal free, under the %d B floor "
+                      "(largest block %u)",
+                 (unsigned)free_internal, CONFIG_CLOCK_MIN_HEAP_FOR_WIFI,
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+        return false;
+    }
+
     esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
     if (err == ESP_OK) {
         err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);

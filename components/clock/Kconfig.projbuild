@@ -124,6 +124,26 @@ menu "Weather Clock"
             range 2 200
             default 15
 
+        config CLOCK_MIN_HEAP_FOR_WIFI
+            int "Internal DRAM floor before starting Wi-Fi (bytes, 0 disables)"
+            range 0 131072
+            default 57344
+            help
+                Bring-up is skipped when free internal DRAM is below this, and
+                the refresh fails cleanly instead.
+
+                Without it, running out during esp_wifi_start() reboots the
+                board: phy_track_pll_init() wraps esp_timer_create() in
+                ESP_ERROR_CHECK, so a ~60 byte allocation failing deep inside
+                the PHY takes the whole device down. That allocation is
+                MALLOC_CAP_INTERNAL, so the 8 MB of PSRAM cannot cover it.
+
+                Bring-up itself costs about 49 KB of internal DRAM, measured
+                on this board, so the floor is that plus a margin. Idle free
+                internal is around 134 KB and the trough during a sync is
+                around 60 KB, so this only trips when something is already
+                badly wrong - it costs a stale reading, not an uptime.
+
     endmenu
 
 endmenu
