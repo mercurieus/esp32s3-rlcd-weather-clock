@@ -112,7 +112,8 @@ each field can hold rather than a typical one. Run it after touching anything in
 `components/ui/`.
 
 `TODO.md` carries the open leads, including a measurement that is suggestive but
-not yet conclusive.
+not yet conclusive. `CHANGELOG.md` records what has changed and what is still
+unverified.
 
 ## Hardware
 
