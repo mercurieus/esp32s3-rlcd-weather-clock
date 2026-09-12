@@ -23,9 +23,27 @@ void Overlay_SetTopBar(const char *temp, const char *hum,
 
 /* Draws the focus frame around an absolute screen rectangle.
    Pass NULL to hide it. */
-/* Marks a sync as in progress, so the status slot shows activity instead of
-   the stale warning. Overlay_SetTopBar leaves the slot alone while busy. */
-void Overlay_SetSyncBusy(bool busy);
+/* What the status slot shows, and why it is not simply an aerial glyph.
+
+   The radio on this board is powered up only for a sync, so it is down for all
+   but a few seconds a day. A permanent aerial would therefore be claiming a
+   connection that almost never exists. These four states each mean something
+   different to someone looking at the panel:
+
+     IDLE, data fresh  -> a tick:     last sync worked, radio resting
+     IDLE, data stale  -> a warning:  the data is old, something is wrong
+     CONNECTING        -> a refresh:  radio up, associating, no address yet
+     CONNECTED         -> an aerial:  associated and holding an IP, right now
+
+   Overlay_SetTopBar owns the slot only in IDLE; the live states are driven by
+   the Wi-Fi event loop and must not be overwritten by a routine tick. */
+typedef enum {
+    OVERLAY_LINK_IDLE = 0,
+    OVERLAY_LINK_CONNECTING,
+    OVERLAY_LINK_CONNECTED,
+} OverlayLinkState;
+
+void Overlay_SetLinkState(OverlayLinkState state);
 
 void Overlay_ShowFocus(const lv_area_t *area);
 

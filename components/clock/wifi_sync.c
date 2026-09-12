@@ -25,6 +25,33 @@ static const char *TAG = "WifiSync";
 static EventGroupHandle_t s_event_group = NULL;
 static bool s_initialized = false;
 
+static WifiLinkState s_link_state = WIFI_LINK_OFF;
+static void (*s_link_observer)(WifiLinkState) = NULL;
+
+/* Notifies only on a real change, so a run of DISCONNECTED events during the
+   retry loop does not repaint the panel once per attempt. The panel is a
+   reflective LCD and a redraw is not free. */
+static void set_link_state(WifiLinkState st)
+{
+    if (s_link_state == st) {
+        return;
+    }
+    s_link_state = st;
+    if (s_link_observer) {
+        s_link_observer(st);
+    }
+}
+
+WifiLinkState WifiSync_LinkState(void)
+{
+    return s_link_state;
+}
+
+void WifiSync_SetLinkObserver(void (*observer)(WifiLinkState))
+{
+    s_link_observer = observer;
+}
+
 static bool    s_wifi_hint_valid = false;
 static uint8_t s_wifi_channel = 0;
 static uint8_t s_wifi_bssid[6];
@@ -43,6 +70,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         xEventGroupSetBits(s_event_group, WIFI_FAIL_BIT);
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        /* Deliberately does not notify the observer. This runs on the sys_evt
+           task, whose stack is around 2.3 KB - an LVGL render and a panel
+           refresh from here overflows it and panics the device, which is
+           exactly what happened when it was tried. Setting the bit wakes the
+           caller, and the caller reports the state from its own stack. */
         xEventGroupSetBits(s_event_group, WIFI_CONNECTED_BIT);
     }
 }
@@ -117,8 +149,11 @@ bool WifiSync_SyncTimeOnce(struct tm *out_time, const char *ssid, const char *pa
                       "(largest block %u)",
                  (unsigned)free_internal, CONFIG_CLOCK_MIN_HEAP_FOR_WIFI,
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+        set_link_state(WIFI_LINK_OFF);
         return false;
     }
+
+    set_link_state(WIFI_LINK_CONNECTING);
 
     esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
     if (err == ESP_OK) {
@@ -137,6 +172,7 @@ bool WifiSync_SyncTimeOnce(struct tm *out_time, const char *ssid, const char *pa
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "WiFi bring-up failed: %s", esp_err_to_name(err));
         esp_wifi_stop();
+        set_link_state(WIFI_LINK_OFF);
         return false;
     }
 
@@ -170,6 +206,12 @@ bool WifiSync_SyncTimeOnce(struct tm *out_time, const char *ssid, const char *pa
 
         if (bits & WIFI_CONNECTED_BIT) {
             connected = true;
+            /* An address, not merely an association - the first moment an
+               aerial glyph would be telling the truth. Reported here, on the
+               caller's task, which has the stack for a repaint and is about to
+               spend several seconds on SNTP and the weather fetch with the
+               link genuinely up. */
+            set_link_state(WIFI_LINK_CONNECTED);
         } else if (use_hint) {
             ESP_LOGW(TAG, "Known channel/BSSID failed, falling back to full scan.");
             s_wifi_hint_valid = false;
@@ -217,6 +259,7 @@ bool WifiSync_SyncTimeOnce(struct tm *out_time, const char *ssid, const char *pa
 
     esp_wifi_disconnect();
     esp_wifi_stop();
+    set_link_state(WIFI_LINK_OFF);
 
     return got_time;
 }

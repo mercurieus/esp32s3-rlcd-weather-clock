@@ -154,13 +154,24 @@ static const char *reset_reason_str(void)
     return marked;
 }
 
-/* The sync runs inline on this task and blocks it for seconds at a time, so
-   the indicator has to be painted before the call and left for the next tick
-   to clear - nothing else gets to run in between. */
-static void set_sync_busy(bool busy)
+/* Paints the radio's real state as it changes.
+
+   Always called on the clock task, from inside WifiSync_SyncTimeOnce() at the
+   points it passes through. Painting from the Wi-Fi event loop instead looks
+   tempting - it would catch the exact instant of association - but sys_evt has
+   roughly 2.3 KB of stack and an LVGL render plus a panel refresh overflows
+   it, which panicked the board into a reboot loop when it was tried. The lock
+   was never the problem; the stack was. */
+static void link_state_cb(WifiLinkState state)
 {
+    OverlayLinkState o;
+    switch (state) {
+    case WIFI_LINK_CONNECTING: o = OVERLAY_LINK_CONNECTING; break;
+    case WIFI_LINK_CONNECTED:  o = OVERLAY_LINK_CONNECTED;  break;
+    default:                   o = OVERLAY_LINK_IDLE;       break;
+    }
     if (Lvgl_lock(-1)) {
-        Overlay_SetSyncBusy(busy);
+        Overlay_SetLinkState(o);
         Lvgl_Refresh();
         Lvgl_unlock();
     }
@@ -175,6 +186,12 @@ static bool      s_last_sync_valid;
    clock even outside the twice-daily sync hours - otherwise a boot that
    missed the network would keep a wrong time until 05:00 or 15:00. */
 static bool      s_time_unsynced;
+/* The RTC is not holding a time worth showing. Distinct from s_time_unsynced:
+   that one means "NTP has not confirmed it", this one means "there is nothing
+   to show at all". It happens on a cold power-on with no network, because this
+   unit has no backup cell fitted - the PCF85063 comes up with its oscillator-
+   stop flag raised and a meaningless time behind it. */
+static bool      s_time_unknown;
 
 /* Redraws the bottom status line. Called every minute rather than only on a
    sync, so the uptime it shows is live: an uptime that only advanced twice an
@@ -277,14 +294,23 @@ static void update_labels(const struct tm *t, float temperature, float humidity,
         char c[2] = { '0', '\0' };
         char temp_buf[32], hum_buf[16], date_buf[40], out_buf[16], batt_buf[16];
 
-        c[0] = (char)('0' + (t->tm_hour / 10) % 10);
-        lv_label_set_text(objects.clock_hh1, c);
-        c[0] = (char)('0' + t->tm_hour % 10);
-        lv_label_set_text(objects.clock_hh2, c);
-        c[0] = (char)('0' + (t->tm_min / 10) % 10);
-        lv_label_set_text(objects.clock_mm1, c);
-        c[0] = (char)('0' + t->tm_min % 10);
-        lv_label_set_text(objects.clock_mm2, c);
+        if (s_time_unknown) {
+            /* Dashes rather than a plausible-looking 00:00. The point of
+               tracking this at all is to not state a time the device has. */
+            lv_label_set_text(objects.clock_hh1, "-");
+            lv_label_set_text(objects.clock_hh2, "-");
+            lv_label_set_text(objects.clock_mm1, "-");
+            lv_label_set_text(objects.clock_mm2, "-");
+        } else {
+            c[0] = (char)('0' + (t->tm_hour / 10) % 10);
+            lv_label_set_text(objects.clock_hh1, c);
+            c[0] = (char)('0' + t->tm_hour % 10);
+            lv_label_set_text(objects.clock_hh2, c);
+            c[0] = (char)('0' + (t->tm_min / 10) % 10);
+            lv_label_set_text(objects.clock_mm1, c);
+            c[0] = (char)('0' + t->tm_min % 10);
+            lv_label_set_text(objects.clock_mm2, c);
+        }
 
         bool temp_negative = temperature < 0.0f;
         float temp_abs = temp_negative ? -temperature : temperature;
@@ -305,7 +331,11 @@ static void update_labels(const struct tm *t, float temperature, float humidity,
            newline is load-bearing: the face date is stacked, weekday over
            day number, because the colon column is far tighter horizontally
            than vertically. */
-        snprintf(date_buf, sizeof(date_buf), "%s\n%d", WEEKDAY_NAMES[t->tm_wday], t->tm_mday);
+        if (s_time_unknown) {
+            snprintf(date_buf, sizeof(date_buf), "--\n--");
+        } else {
+            snprintf(date_buf, sizeof(date_buf), "%s\n%d", WEEKDAY_NAMES[t->tm_wday], t->tm_mday);
+        }
         lv_label_set_text(objects.clock_date, date_buf);
 
         /* Prefer the current conditions; fall back to today's forecast high
@@ -496,6 +526,7 @@ static void clock_task(void *arg)
 
     ClockTime_SetTimezone(CONFIG_CLOCK_TIMEZONE);
     WifiSync_Init();
+    WifiSync_SetLinkObserver(link_state_cb);
     Pcf85063_Init((gpio_num_t)ESP32_I2C_SDA_PIN, (gpio_num_t)ESP32_I2C_SCL_PIN);
     Shtc3_Init(Pcf85063_GetBusHandle());
     Battery_Init();
@@ -516,6 +547,7 @@ static void clock_task(void *arg)
         ClockTime_UtcToLocal(&t_utc, &t);  /* everything displayed is local */
         set_status("Time synced.");
         update_sync_label(&t);
+        s_time_unknown = false;
         ESP_LOGI(TAG, "RTC set from NTP.");
     } else {
         /* A missed sync is not a reason to stop being a clock. This used to
@@ -529,10 +561,21 @@ static void clock_task(void *arg)
            needed this sync at all. Weather refreshes retry on their own slot,
            so the network gets another chance within WEATHER_REFRESH_MIN. */
         s_time_unsynced = true;
-        ESP_LOGW(TAG, "Startup sync failed - running on the RTC, retrying on the next slot.");
-        set_status("No network - using the RTC clock.");
-        if (Pcf85063_GetTime(&t_utc) == ESP_OK) {
+
+        /* Whether the RTC is worth falling back on depends on whether it kept
+           running. With no backup cell fitted it holds time across a reset,
+           where main power never dropped, but not across an unplug. */
+        bool rtc_valid = false;
+        if (Pcf85063_TimeIsValid(&rtc_valid) == ESP_OK && rtc_valid &&
+            Pcf85063_GetTime(&t_utc) == ESP_OK) {
             ClockTime_UtcToLocal(&t_utc, &t);
+            ESP_LOGW(TAG, "Startup sync failed - running on the RTC, retrying on the next slot.");
+            set_status("No network - showing the RTC clock.");
+        } else {
+            s_time_unknown = true;
+            ESP_LOGW(TAG, "Startup sync failed and the RTC has no valid time "
+                          "(no backup cell) - showing dashes until a sync lands.");
+            set_status("No network yet - waiting for the time.");
         }
     }
 
@@ -708,11 +751,9 @@ static void clock_task(void *arg)
                 const size_t heap_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
 
                 struct tm ntp_utc;
-                set_sync_busy(true);
                 const bool ok = WifiSync_SyncTimeOnce(&ntp_utc, CONFIG_CLOCK_WIFI_SSID,
                                                       CONFIG_CLOCK_WIFI_PASS, 15000,
                                                       wifi_connected_cb, s_weather);
-                set_sync_busy(false);
 
                 /* The per-cycle delta is the number that matters: the crash is
                    internal DRAM running out during a Wi-Fi bring-up, so a
@@ -743,6 +784,7 @@ static void clock_task(void *arg)
                     Pcf85063_SetTime(&ntp_utc);
                     ClockTime_UtcToLocal(&ntp_utc, &now);
                     s_time_unsynced = false;
+                    s_time_unknown = false;
                 }
                 /* The label says "last weather sync", so it has to follow the
                    weather cycle, not the twice-daily time sync it used to
